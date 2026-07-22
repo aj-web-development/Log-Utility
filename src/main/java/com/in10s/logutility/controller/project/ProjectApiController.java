@@ -24,6 +24,7 @@ import com.in10s.logutility.service.parser.LogbackXmlParser;
 import com.in10s.logutility.service.parser.SampleLineAnalyzer;
 import com.in10s.logutility.service.project.ProjectService;
 import com.in10s.logutility.service.project.ProjectWizardValidation;
+import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -65,16 +66,19 @@ public class ProjectApiController {
     private final SampleLineAnalyzer sampleLineAnalyzer;
 
     @GetMapping
+    @Operation(summary = "List all projects", description = "Lightweight summaries, including node/field counts.")
     public List<ProjectSummaryDto> listProjects() {
         return projectService.listProjects();
     }
 
     @GetMapping("/{id}")
+    @Operation(summary = "Get a project's full configuration", description = "Nodes, filter fields, and line pattern - the edit-prefill equivalent.")
     public ProjectDetailResponse getProject(@PathVariable UUID id) {
         return toDetailResponse(projectService.loadForEdit(id));
     }
 
     @PostMapping
+    @Operation(summary = "Create a project", description = "One complete payload: name (required), nodes (at least one labeled), filter fields, and an optional line pattern.")
     public ResponseEntity<ProjectDetailResponse> createProject(@RequestBody ProjectRequest request) {
         ProjectWizardForm form = toForm(request, null);
         validate(form);
@@ -83,6 +87,7 @@ public class ProjectApiController {
     }
 
     @PutMapping("/{id}")
+    @Operation(summary = "Replace a project's configuration", description = "Same shape as create; nodes/fields are replaced wholesale, not merged.")
     public ProjectDetailResponse updateProject(@PathVariable UUID id, @RequestBody ProjectRequest request) {
         ProjectWizardForm form = toForm(request, id);
         validate(form);
@@ -92,11 +97,13 @@ public class ProjectApiController {
 
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
+    @Operation(summary = "Delete a project", description = "Idempotent - deleting an already-missing id still returns 204.")
     public void deleteProject(@PathVariable UUID id) {
         projectService.deleteProject(id);
     }
 
     @PostMapping(value = "/logback/parse", consumes = "multipart/form-data")
+    @Operation(summary = "Parse a logback-spring.xml", description = "Extracts MDC-field suggestions and the backup file pattern, to help pre-fill a create/update payload.")
     public LogbackParseResult parseLogback(@RequestPart("file") MultipartFile file) {
         if (file.isEmpty()) {
             throw new IllegalArgumentException("Choose a logback-spring.xml file to upload.");
@@ -111,11 +118,13 @@ public class ProjectApiController {
     }
 
     @PostMapping("/sample-line/analyze")
+    @Operation(summary = "Analyze a sample log line", description = "Suggests timestamp/level/logger patterns to pre-fill a project's line pattern.")
     public SampleLineAnalysis analyzeSampleLine(@RequestBody SampleLineRequest request) {
         return sampleLineAnalyzer.analyze(request.sampleLine());
     }
 
     @PostMapping("/path-check")
+    @Operation(summary = "Check a live/backup path pair", description = "logSourceId is optional - pass it to also record the result onto that persisted node.")
     public PathCheckOutcome checkPath(@RequestBody PathCheckRequest request) {
         return projectService.checkPaths(request.livePath(), request.backupPath(), request.logSourceId());
     }
