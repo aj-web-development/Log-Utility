@@ -4,16 +4,20 @@ import com.in10s.logutility.entity.project.CheckStatus;
 import com.in10s.logutility.entity.project.FilterField;
 import com.in10s.logutility.entity.project.LinePattern;
 import com.in10s.logutility.entity.project.LogSource;
+import com.in10s.logutility.exception.project.ProjectNotFoundException;
 import com.in10s.logutility.repository.project.LogSourceRepository;
 import com.in10s.logutility.entity.project.MatchType;
 import com.in10s.logutility.entity.project.Project;
 import com.in10s.logutility.repository.project.ProjectRepository;
+import com.in10s.logutility.service.validation.PathAvailabilityChecker;
+import com.in10s.logutility.response.validation.PathCheckResult;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -21,6 +25,7 @@ import com.in10s.logutility.request.project.FilterFieldForm;
 import com.in10s.logutility.request.project.LinePatternForm;
 import com.in10s.logutility.request.project.NodeForm;
 import com.in10s.logutility.request.project.ProjectWizardForm;
+import com.in10s.logutility.response.project.PathCheckOutcome;
 import com.in10s.logutility.response.project.ProjectSummaryDto;
 import com.in10s.logutility.response.project.PublicFilterFieldView;
 import com.in10s.logutility.response.project.PublicProjectView;
@@ -31,6 +36,7 @@ public class ProjectServiceImpl implements ProjectService {
 
     private final ProjectRepository projectRepository;
     private final LogSourceRepository logSourceRepository;
+    private final PathAvailabilityChecker pathAvailabilityChecker;
 
     @Override
     @Transactional(readOnly = true)
@@ -65,7 +71,7 @@ public class ProjectServiceImpl implements ProjectService {
         Project project = form.getProjectId() == null
                 ? new Project()
                 : projectRepository.findById(form.getProjectId())
-                        .orElseThrow(() -> new IllegalArgumentException("Project not found: " + form.getProjectId()));
+                        .orElseThrow(() -> new ProjectNotFoundException(form.getProjectId()));
 
         project.setName(trimToNull(form.getName()));
         project.setDescription(trimToNull(form.getDescription()));
@@ -118,7 +124,7 @@ public class ProjectServiceImpl implements ProjectService {
     @Transactional(readOnly = true)
     public ProjectWizardForm loadForEdit(UUID id) {
         Project project = projectRepository.findById(id)
-                .orElseThrow(() -> new IllegalArgumentException("Project not found: " + id));
+                .orElseThrow(() -> new ProjectNotFoundException(id));
 
         ProjectWizardForm form = new ProjectWizardForm();
         form.setProjectId(project.getId());
@@ -172,6 +178,35 @@ public class ProjectServiceImpl implements ProjectService {
             node.setLastCheckStatus(reachable ? CheckStatus.REACHABLE : CheckStatus.UNREACHABLE);
             node.setLastCheckMessage(message);
         });
+    }
+
+    @Override
+    @Transactional
+    public PathCheckOutcome checkPaths(String livePath, String backupPath, UUID logSourceId) {
+        List<String> parts = new ArrayList<>();
+        boolean anyConfigured = false;
+        boolean allReachable = true;
+
+        if (StringUtils.hasText(livePath)) {
+            anyConfigured = true;
+            PathCheckResult r = pathAvailabilityChecker.check(livePath);
+            allReachable = allReachable && r.reachable();
+            parts.add("Live: " + r.message());
+        }
+        if (StringUtils.hasText(backupPath)) {
+            anyConfigured = true;
+            PathCheckResult r = pathAvailabilityChecker.check(backupPath);
+            allReachable = allReachable && r.reachable();
+            parts.add("Backup: " + r.message());
+        }
+
+        boolean reachable = anyConfigured && allReachable;
+        String message = anyConfigured ? String.join("; ", parts) : "No paths configured";
+
+        if (logSourceId != null) {
+            recordLogSourceCheck(logSourceId, reachable, message);
+        }
+        return new PathCheckOutcome(reachable ? CheckStatus.REACHABLE : CheckStatus.UNREACHABLE, message);
     }
 
     private static boolean isNodeEmpty(NodeForm nf) {

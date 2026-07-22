@@ -5,6 +5,7 @@ import java.util.Optional;
 import java.util.UUID;
 import com.in10s.logutility.entity.project.LogSource;
 import com.in10s.logutility.request.project.ProjectWizardForm;
+import com.in10s.logutility.response.project.PathCheckOutcome;
 import com.in10s.logutility.response.project.ProjectSummaryDto;
 import com.in10s.logutility.response.project.PublicProjectView;
 
@@ -39,4 +40,13 @@ public interface ProjectService {
      * source no longer exists (e.g. it was removed from the wizard draft before saving).
      */
     void recordLogSourceCheck(UUID logSourceId, boolean reachable, String message);
+
+    /**
+     * Checks whichever of a node's live/backup paths are non-blank and folds them into one
+     * combined result (a {@code LogSource} has one check status, not one per path). Never throws
+     * — an unreachable or unconfigured path is a normal outcome, not an error. If
+     * {@code logSourceId} is given, the combined result is also recorded onto that row via
+     * {@link #recordLogSourceCheck}.
+     */
+    PathCheckOutcome checkPaths(String livePath, String backupPath, UUID logSourceId);
 }

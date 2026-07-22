@@ -7,8 +7,6 @@ import com.in10s.logutility.response.parser.MdcFieldSuggestion;
 import com.in10s.logutility.response.parser.SampleLineAnalysis;
 import com.in10s.logutility.service.parser.SampleLineAnalyzer;
 import com.in10s.logutility.entity.project.MatchType;
-import com.in10s.logutility.service.validation.PathAvailabilityChecker;
-import com.in10s.logutility.response.validation.PathCheckResult;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.servlet.http.HttpSession;
 import lombok.RequiredArgsConstructor;
@@ -27,15 +25,14 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
-import com.in10s.logutility.entity.project.FilterField;
-import com.in10s.logutility.entity.project.LogSource;
-import com.in10s.logutility.entity.project.Project;
 import com.in10s.logutility.request.project.FilterFieldForm;
 import com.in10s.logutility.request.project.LinePatternForm;
 import com.in10s.logutility.request.project.NodeForm;
 import com.in10s.logutility.request.project.ProjectWizardForm;
+import com.in10s.logutility.response.project.PathCheckOutcome;
 import com.in10s.logutility.response.project.WizardStep;
 import com.in10s.logutility.service.project.ProjectService;
+import com.in10s.logutility.service.project.ProjectWizardValidation;
 
 /**
  * The HTMX-driven project setup wizard. The working {@link ProjectWizardForm} lives in the HTTP
@@ -57,7 +54,6 @@ public class ProjectWizardController {
     private static final String STEP_FRAGMENT = "admin/projects/steps :: stepBody";
 
     private final ProjectService projectService;
-    private final PathAvailabilityChecker pathAvailabilityChecker;
     private final LogbackXmlParser logbackXmlParser;
     private final SampleLineAnalyzer sampleLineAnalyzer;
 
@@ -155,7 +151,7 @@ public class ProjectWizardController {
         draft.setName(submitted.getName());
         draft.setDescription(submitted.getDescription());
 
-        String error = validateDetails(draft);
+        String error = ProjectWizardValidation.validateDetails(draft);
         if (error == null && projectService.nameExists(draft.getName(), draft.getProjectId())) {
             error = "A project named \"" + draft.getName().trim() + "\" already exists.";
         }
@@ -200,31 +196,12 @@ public class ProjectWizardController {
                            @RequestParam(required = false) String backupPath,
                            @RequestParam(required = false) String logSourceId,
                            Model model) {
-        List<String> parts = new ArrayList<>();
-        boolean anyConfigured = false;
-        boolean allReachable = true;
-
-        if (livePath != null && !livePath.isBlank()) {
-            anyConfigured = true;
-            PathCheckResult r = pathAvailabilityChecker.check(livePath);
-            allReachable = allReachable && r.reachable();
-            parts.add("Live: " + r.message());
-        }
-        if (backupPath != null && !backupPath.isBlank()) {
-            anyConfigured = true;
-            PathCheckResult r = pathAvailabilityChecker.check(backupPath);
-            allReachable = allReachable && r.reachable();
-            parts.add("Backup: " + r.message());
-        }
-
-        boolean reachable = anyConfigured && allReachable;
-        String message = anyConfigured ? String.join("; ", parts) : "No paths configured";
-
-        if (logSourceId != null && !logSourceId.isBlank()) {
-            projectService.recordLogSourceCheck(UUID.fromString(logSourceId), reachable, message);
-        }
-        model.addAttribute("status", reachable ? "REACHABLE" : "UNREACHABLE");
-        model.addAttribute("message", message);
+        // logSourceId is only passed once the row backs an already-persisted LogSource; checkPaths
+        // records the combined result onto it in that case (see ProjectService#recordLogSourceCheck).
+        UUID sourceId = (logSourceId != null && !logSourceId.isBlank()) ? UUID.fromString(logSourceId) : null;
+        PathCheckOutcome outcome = projectService.checkPaths(livePath, backupPath, sourceId);
+        model.addAttribute("status", outcome.status().name());
+        model.addAttribute("message", outcome.message());
         return "admin/projects/path-badge :: badge";
     }
 
@@ -232,7 +209,7 @@ public class ProjectWizardController {
     public String submitNodes(@ModelAttribute ProjectWizardForm submitted, HttpSession session, Model model) {
         ProjectWizardForm draft = draft(session);
         draft.setNodes(nonNull(submitted.getNodes()));
-        String error = validateNodes(draft);
+        String error = ProjectWizardValidation.validateNodes(draft);
         return step(session, model, draft, error == null ? WizardStep.SAMPLE_LINE : WizardStep.NODES, error);
     }
 
@@ -307,7 +284,7 @@ public class ProjectWizardController {
     public String submitFields(@ModelAttribute ProjectWizardForm submitted, HttpSession session, Model model) {
         ProjectWizardForm draft = draft(session);
         draft.setFilterFields(nonNull(submitted.getFilterFields()));
-        String error = validateFields(draft);
+        String error = ProjectWizardValidation.validateFields(draft);
         return step(session, model, draft, error == null ? WizardStep.REVIEW : WizardStep.FIELDS, error);
     }
 
@@ -329,9 +306,9 @@ public class ProjectWizardController {
     public String save(HttpSession session, Model model, HttpServletResponse response) {
         ProjectWizardForm draft = draft(session);
 
-        String error = validateDetails(draft);
+        String error = ProjectWizardValidation.validateDetails(draft);
         if (error == null) {
-            error = validateNodes(draft);
+            error = ProjectWizardValidation.validateNodes(draft);
         }
         if (error == null && projectService.nameExists(draft.getName(), draft.getProjectId())) {
             error = "A project named \"" + draft.getName().trim() + "\" already exists.";
@@ -382,33 +359,5 @@ public class ProjectWizardController {
 
     private static LinePatternForm nonNullLinePattern(LinePatternForm form) {
         return form == null ? new LinePatternForm() : form;
-    }
-
-    private static String validateDetails(ProjectWizardForm draft) {
-        if (draft.getName() == null || draft.getName().isBlank()) {
-            return "Project name is required.";
-        }
-        return null;
-    }
-
-    private static String validateNodes(ProjectWizardForm draft) {
-        boolean hasNamedNode = draft.getNodes().stream()
-                .anyMatch(n -> n.getNodeLabel() != null && !n.getNodeLabel().isBlank());
-        if (!hasNamedNode) {
-            return "Add at least one node with a label.";
-        }
-        return null;
-    }
-
-    private static String validateFields(ProjectWizardForm draft) {
-        // Filter fields are optional, but any partially filled row must have both a key and a label.
-        for (FilterFieldForm f : draft.getFilterFields()) {
-            boolean hasKey = f.getKey() != null && !f.getKey().isBlank();
-            boolean hasLabel = f.getLabel() != null && !f.getLabel().isBlank();
-            if (hasKey ^ hasLabel) {
-                return "Each filter field needs both a key and a label.";
-            }
-        }
-        return null;
     }
 }
