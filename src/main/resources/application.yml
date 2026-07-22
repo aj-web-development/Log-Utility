@@ -30,10 +30,21 @@ spring:
       # The prod profile overrides this to 'never' because Flyway owns the session tables there.
       initialize-schema: embedded
 
-# Log-search engine tuning, consumed by the Phase 6 search pipeline.
+# Log-search engine tuning, consumed by the search pipeline.
 search:
   max-results: 5000
   max-nodes-parallel: 16
+  # Continuation lines (no timestamp, e.g. a stack trace) folded into one entry before it's
+  # force-flushed - guards against a misconfigured line pattern buffering a whole file into one entry.
+  max-continuation-lines: 300
+  # Largest from/to span a single search may cover.
+  max-date-range-days: 30
+  # Searches running at once across all users (search has no login); extras get a 429.
+  max-concurrent-searches: 8
+  # Matched lines batched per SSE "chunk" event, and per producer's in-flight buffer size.
+  chunk-size: 200
+  # How long an SSE connection (GET /api/search/stream) may stay open before it's forced closed.
+  sse-timeout-millis: 60000
 
 management:
   endpoints:

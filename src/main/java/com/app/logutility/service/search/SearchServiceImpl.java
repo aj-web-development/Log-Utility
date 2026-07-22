@@ -1,8 +1,10 @@
 package com.app.logutility.service.search;
 
 import com.app.logutility.entity.project.FilterField;
+import com.app.logutility.entity.project.LogFile;
 import com.app.logutility.entity.project.LogSource;
 import com.app.logutility.entity.project.MatchType;
+import com.app.logutility.exception.search.SearchOverloadedException;
 import com.app.logutility.service.search.ProjectSearchLoader.LoadedProject;
 import com.app.logutility.service.validation.PathAvailabilityChecker;
 import org.slf4j.Logger;
@@ -14,22 +16,23 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -37,7 +40,9 @@ import com.app.logutility.config.search.SearchProperties;
 import com.app.logutility.dto.search.ScanPlan;
 import com.app.logutility.request.search.SearchRequest;
 import com.app.logutility.response.search.LogLine;
+import com.app.logutility.response.search.SearchProgress;
 import com.app.logutility.response.search.SearchResult;
+import com.app.logutility.response.search.SearchSummary;
 
 @Service
 public class SearchServiceImpl implements SearchService {
@@ -49,10 +54,11 @@ public class SearchServiceImpl implements SearchService {
     private final GlobFileResolver globFileResolver;
     private final LogSourceReaderFactory readerFactory;
     private final LogLineParserFactory parserFactory;
-    private final ResultMerger resultMerger;
+    private final StreamingResultMerger streamingResultMerger;
     private final PathAvailabilityChecker pathChecker;
     private final SearchProperties properties;
     private final Clock clock;
+    private final Semaphore searchConcurrencyGate;
     private final Map<MatchType, FieldMatcher> matchers;
 
     public SearchServiceImpl(ProjectSearchLoader loader,
@@ -60,109 +66,209 @@ public class SearchServiceImpl implements SearchService {
                              GlobFileResolver globFileResolver,
                              LogSourceReaderFactory readerFactory,
                              LogLineParserFactory parserFactory,
-                             ResultMerger resultMerger,
+                             StreamingResultMerger streamingResultMerger,
                              PathAvailabilityChecker pathChecker,
                              SearchProperties properties,
                              Clock searchClock,
+                             Semaphore searchConcurrencyGate,
                              List<FieldMatcher> fieldMatchers) {
         this.loader = loader;
         this.datePruner = datePruner;
         this.globFileResolver = globFileResolver;
         this.readerFactory = readerFactory;
         this.parserFactory = parserFactory;
-        this.resultMerger = resultMerger;
+        this.streamingResultMerger = streamingResultMerger;
         this.pathChecker = pathChecker;
         this.properties = properties;
         this.clock = searchClock;
+        this.searchConcurrencyGate = searchConcurrencyGate;
         this.matchers = fieldMatchers.stream().collect(Collectors.toMap(FieldMatcher::type, m -> m));
     }
 
     @Override
     public SearchResult search(SearchRequest request) {
         long startMillis = System.currentTimeMillis();
+        SearchContext ctx = prepare(request);
+
+        acquireGate();
+        try {
+            List<LogLine> merged = new ArrayList<>();
+            ScanOutcome outcome = runSearch(ctx, merged::add, progress -> { });
+
+            List<LogLine> page = paginate(merged, request.page(), request.pageSize());
+            long elapsed = System.currentTimeMillis() - startMillis;
+            return new SearchResult(page, outcome.totalMatched(), outcome.truncated(),
+                    outcome.unreachableNodes(), elapsed);
+        } finally {
+            searchConcurrencyGate.release();
+        }
+    }
+
+    @Override
+    public void searchStreaming(SearchRequest request, Consumer<List<LogLine>> onChunk,
+                                Consumer<SearchProgress> onProgress, Consumer<SearchSummary> onComplete) {
+        long startMillis = System.currentTimeMillis();
+        SearchContext ctx = prepare(request);
+        int chunkSize = Math.max(1, properties.getChunkSize());
+
+        acquireGate();
+        try {
+            List<LogLine> buffer = new ArrayList<>(chunkSize);
+            ScanOutcome outcome = runSearch(ctx, line -> {
+                buffer.add(line);
+                if (buffer.size() >= chunkSize) {
+                    onChunk.accept(new ArrayList<>(buffer));
+                    buffer.clear();
+                }
+            }, onProgress);
+            if (!buffer.isEmpty()) {
+                onChunk.accept(new ArrayList<>(buffer));
+            }
+
+            long elapsed = System.currentTimeMillis() - startMillis;
+            onComplete.accept(new SearchSummary(
+                    outcome.totalMatched(), outcome.truncated(), outcome.unreachableNodes(), elapsed));
+        } finally {
+            searchConcurrencyGate.release();
+        }
+    }
+
+    // ------------------------------------------------------------------ request setup
+
+    /** Loads the project, resolves defaults, and validates the range — all before any I/O work starts. */
+    private SearchContext prepare(SearchRequest request) {
         LoadedProject project = loader.load(request.projectId());
 
         LocalDateTime to = request.to() != null ? request.to() : LocalDateTime.now(clock);
         LocalDateTime from = request.from() != null ? request.from() : to.minusDays(1);
+        validateRange(from, to);
 
         LogLineParser parser = parserFactory.create(project.linePattern());
         Predicate<String> lineMatches = buildPredicate(request, project.fields());
-
         int maxResults = Math.max(1, properties.getMaxResults());
-        ScanState state = new ScanState(maxResults);
-        Semaphore gate = new Semaphore(Math.max(1, properties.getMaxNodesParallel()));
 
-        // One virtual thread per node; the semaphore bounds concurrent filesystem I/O.
+        return new SearchContext(project, from, to, parser, lineMatches, maxResults);
+    }
+
+    private void validateRange(LocalDateTime from, LocalDateTime to) {
+        if (from.isAfter(to)) {
+            throw new IllegalArgumentException("'from' must not be after 'to'");
+        }
+        int maxDays = Math.max(1, properties.getMaxDateRangeDays());
+        long days = Duration.between(from, to).toDays();
+        if (days > maxDays) {
+            throw new IllegalArgumentException(
+                    "Date range too large: %d day(s) requested, maximum is %d".formatted(days, maxDays));
+        }
+    }
+
+    private void acquireGate() {
+        if (!searchConcurrencyGate.tryAcquire()) {
+            throw new SearchOverloadedException(
+                    "The server is busy handling other searches right now; please retry shortly.");
+        }
+    }
+
+    private record SearchContext(LoadedProject project, LocalDateTime from, LocalDateTime to,
+                                 LogLineParser parser, Predicate<String> lineMatches, int maxResults) {
+    }
+
+    // ------------------------------------------------------------------ fan-out + streaming merge
+
+    /**
+     * Runs one virtual thread per (node, log file) pair, streams every unit's matches through a
+     * bounded {@link StreamingResultMerger} so memory stays proportional to
+     * {@code scanUnitCount × chunkSize} rather than to the total match count, and calls
+     * {@code onResult} once per merged, in-order entry. If the global {@code maxResults} cap is
+     * hit, remaining tasks are cancelled (interrupting any of them parked mid-{@code put} on a
+     * full queue) instead of left to finish.
+     */
+    private ScanOutcome runSearch(SearchContext ctx, Consumer<LogLine> onResult, Consumer<SearchProgress> onProgress) {
+        ScanState state = new ScanState();
+        Semaphore ioGate = new Semaphore(Math.max(1, properties.getMaxNodesParallel()));
+        List<NodeProducer> producers = new ArrayList<>();
+        List<Future<?>> futures = new ArrayList<>();
+        AtomicLong emitted = new AtomicLong();
+        int scanUnitsTotal = ctx.project().nodes().stream().mapToInt(n -> n.getLogFiles().size()).sum();
+
         try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
-            List<Future<?>> futures = new ArrayList<>();
-            for (LogSource node : project.nodes()) {
-                futures.add(executor.submit(() ->
-                        scanNode(node, from, to, parser, lineMatches, gate, state)));
+            for (LogSource node : ctx.project().nodes()) {
+                for (LogFile file : node.getLogFiles()) {
+                    NodeProducer producer = new NodeProducer(scanLabel(node, file), properties.getChunkSize());
+                    producers.add(producer);
+                    futures.add(executor.submit(() ->
+                            scanLogFile(node, file, ctx, ioGate, producer, state, scanUnitsTotal, onProgress)));
+                }
             }
-            for (Future<?> future : futures) {
-                joinQuietly(future);
-            }
-        }
 
-        List<LogLine> merged = resultMerger.mergeSorted(new ArrayList<>(state.collected));
-        if (merged.size() > maxResults) {
-            merged = merged.subList(0, maxResults);
-            state.truncated.set(true);
+            streamingResultMerger.merge(producers, ctx.maxResults(), line -> {
+                emitted.incrementAndGet();
+                onResult.accept(line);
+            }, () -> state.truncated.set(true));
+
+            if (state.truncated.get()) {
+                futures.forEach(f -> f.cancel(true));
+            }
+            futures.forEach(SearchServiceImpl::joinQuietly);
         }
-        long totalMatched = merged.size();
-        List<LogLine> page = paginate(merged, request.page(), request.pageSize());
-        long elapsed = System.currentTimeMillis() - startMillis;
 
         List<String> unreachable = new ArrayList<>(state.unreachableNodes);
         Collections.sort(unreachable);
-        return new SearchResult(page, totalMatched, state.truncated.get(), unreachable, elapsed);
+        return new ScanOutcome(emitted.get(), state.truncated.get(), unreachable);
     }
 
-    // ------------------------------------------------------------------ per-node scan
-
-    private void scanNode(LogSource node, LocalDateTime from, LocalDateTime to,
-                          LogLineParser parser, Predicate<String> lineMatches,
-                          Semaphore gate, ScanState state) {
-        gate.acquireUninterruptibly();
+    private void scanLogFile(LogSource node, LogFile file, SearchContext ctx, Semaphore ioGate,
+                             NodeProducer producer, ScanState state, int scanUnitsTotal,
+                             Consumer<SearchProgress> onProgress) {
+        ioGate.acquireUninterruptibly();
         try {
-            boolean liveReachable = StringUtils.hasText(node.getLiveLogPath())
-                    && pathChecker.check(node.getLiveLogPath()).reachable();
-            boolean backupReachable = StringUtils.hasText(node.getBackupRootPath())
-                    && pathChecker.check(node.getBackupRootPath()).reachable();
+            boolean liveReachable = StringUtils.hasText(file.getLiveLogPath())
+                    && pathChecker.check(file.getLiveLogPath()).reachable();
+            boolean backupReachable = StringUtils.hasText(file.getBackupRootPath())
+                    && pathChecker.check(file.getBackupRootPath()).reachable();
 
             if (!liveReachable && !backupReachable) {
-                state.unreachableNodes.add(node.getNodeLabel());
+                state.unreachableNodes.add(scanLabel(node, file));
                 return;
             }
 
-            for (Path file : resolveFiles(node, from, to, liveReachable, backupReachable)) {
+            for (Path path : resolveFiles(file, ctx.from(), ctx.to(), liveReachable, backupReachable)) {
                 if (state.truncated.get()) {
                     return;
                 }
-                scanFile(node.getNodeLabel(), file, from, to, parser, lineMatches, state);
+                scanFile(node.getNodeLabel(), file.getFileLabel(), path, ctx, state, producer);
             }
         } catch (RuntimeException e) {
-            log.warn("Scan failed for node {}: {}", node.getNodeLabel(), e.toString());
+            log.warn("Scan failed for {}: {}", scanLabel(node, file), e.toString());
         } finally {
-            gate.release();
+            finishQuietly(producer);
+            ioGate.release();
+            onProgress.accept(new SearchProgress(
+                    scanLabel(node, file), state.nodesCompleted.incrementAndGet(), scanUnitsTotal));
         }
     }
 
+    private static String scanLabel(LogSource node, LogFile file) {
+        return StringUtils.hasText(file.getFileLabel())
+                ? node.getNodeLabel() + " · " + file.getFileLabel()
+                : node.getNodeLabel();
+    }
+
     /** Backups first (oldest→newest by name), then the live file last, so results run chronologically. */
-    private List<Path> resolveFiles(LogSource node, LocalDateTime from, LocalDateTime to,
+    private List<Path> resolveFiles(LogFile file, LocalDateTime from, LocalDateTime to,
                                     boolean liveReachable, boolean backupReachable) {
         List<Path> files = new ArrayList<>();
-        ScanPlan plan = datePruner.plan(node.getBackupRootPath(), node.getBackupPathPattern(), from, to);
+        ScanPlan plan = datePruner.plan(file.getBackupRootPath(), file.getBackupPathPattern(), from, to);
 
         if (backupReachable && !plan.backupGlobs().isEmpty()) {
-            Path base = Path.of(node.getBackupRootPath());
+            Path base = Path.of(file.getBackupRootPath());
             for (String glob : plan.backupGlobs()) {
                 files.addAll(globFileResolver.resolve(base, glob));
             }
             files.sort(Comparator.comparing(Path::toString));
         }
         if (plan.includeLive() && liveReachable) {
-            Path live = Path.of(node.getLiveLogPath());
+            Path live = Path.of(file.getLiveLogPath());
             if (Files.isRegularFile(live)) {
                 files.add(live);
             }
@@ -170,42 +276,36 @@ public class SearchServiceImpl implements SearchService {
         return files;
     }
 
-    private void scanFile(String nodeLabel, Path file, LocalDateTime from, LocalDateTime to,
-                          LogLineParser parser, Predicate<String> lineMatches, ScanState state) {
-        Optional<LogSourceReader> reader = readerFactory.readerFor(file);
+    private void scanFile(String nodeLabel, String fileLabel, Path path, SearchContext ctx,
+                          ScanState state, NodeProducer producer) {
+        Optional<LogSourceReader> reader = readerFactory.readerFor(path);
         if (reader.isEmpty()) {
             return;
         }
-        try (Stream<String> lines = reader.get().readLines(file)) {
-            Iterator<String> iterator = lines.iterator();
-            while (iterator.hasNext()) {
+        try (Stream<String> lines = reader.get().readLines(path)) {
+            LogEntryAssembler assembler = new LogEntryAssembler(
+                    lines.iterator(), ctx.parser(), properties.getMaxContinuationLines());
+            while (assembler.hasNext()) {
                 if (state.truncated.get()) {
                     return;
                 }
-                String line = iterator.next();
+                LogEntryAssembler.RawEntry entry = assembler.next();
 
-                // Fast-reject: parse only the leading timestamp and drop out-of-range lines
-                // before running the (more expensive) field/text matchers.
-                Optional<LocalDateTime> timestamp = parser.timestamp(line);
-                if (timestamp.isPresent()) {
-                    LocalDateTime ts = timestamp.get();
-                    if (ts.isBefore(from) || ts.isAfter(to)) {
-                        continue;
-                    }
-                }
-                if (!lineMatches.test(line)) {
+                // Fast-reject: an out-of-range entry is dropped whole, without running the (more
+                // expensive) field/text matcher over its (possibly multi-line) body.
+                LocalDateTime ts = entry.timestamp();
+                if (ts != null && (ts.isBefore(ctx.from()) || ts.isAfter(ctx.to()))) {
                     continue;
                 }
-
-                int position = state.count.incrementAndGet();
-                if (position > state.maxResults) {
-                    state.truncated.set(true);
-                    return;
+                if (!ctx.lineMatches().test(entry.raw())) {
+                    continue;
                 }
-                state.collected.add(new LogLine(nodeLabel, timestamp.orElse(null), parser.level(line), line));
+                producer.offer(new LogLine(nodeLabel, fileLabel, ts, entry.level(), entry.raw()));
             }
         } catch (IOException e) {
-            log.warn("Could not read {}: {}", file, e.toString());
+            log.warn("Could not read {}: {}", path, e.toString());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
     }
 
@@ -265,16 +365,21 @@ public class SearchServiceImpl implements SearchService {
         }
     }
 
-    /** Shared, thread-safe accumulation state for one search across all node tasks. */
-    private static final class ScanState {
-        private final int maxResults;
-        private final ConcurrentLinkedQueue<LogLine> collected = new ConcurrentLinkedQueue<>();
-        private final AtomicInteger count = new AtomicInteger();
-        private final AtomicBoolean truncated = new AtomicBoolean(false);
-        private final List<String> unreachableNodes = Collections.synchronizedList(new ArrayList<>());
-
-        private ScanState(int maxResults) {
-            this.maxResults = maxResults;
+    private static void finishQuietly(NodeProducer producer) {
+        try {
+            producer.finish();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
+    }
+
+    /** Shared, thread-safe bookkeeping for one search across all node tasks. */
+    private static final class ScanState {
+        private final AtomicBoolean truncated = new AtomicBoolean(false);
+        private final AtomicInteger nodesCompleted = new AtomicInteger();
+        private final List<String> unreachableNodes = Collections.synchronizedList(new ArrayList<>());
+    }
+
+    private record ScanOutcome(long totalMatched, boolean truncated, List<String> unreachableNodes) {
     }
 }

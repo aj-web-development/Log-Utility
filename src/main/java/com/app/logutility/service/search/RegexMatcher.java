@@ -23,7 +23,8 @@ public class RegexMatcher implements FieldMatcher {
 
     @Override
     public Predicate<String> build(FilterField field, String value) {
-        Pattern pattern = Pattern.compile(value);
+        // DOTALL so '.' can span the embedded newlines of a multi-line (e.g. stack trace) entry.
+        Pattern pattern = Pattern.compile(value, Pattern.DOTALL);
         return line -> pattern.matcher(line).find();
     }
 }

@@ -35,18 +35,18 @@ public interface ProjectService {
     void deleteProject(UUID id);
 
     /**
-     * Persists the outcome of a "Test path" check onto an existing {@code LogSource}, purely
+     * Persists the outcome of a "Test path" check onto an existing {@code LogFile}, purely
      * for later display — this never blocks or gates saving a project. A no-op if the log
-     * source no longer exists (e.g. it was removed from the wizard draft before saving).
+     * file no longer exists (e.g. it was removed from the wizard draft before saving).
      */
-    void recordLogSourceCheck(UUID logSourceId, boolean reachable, String message);
+    void recordLogFileCheck(UUID logFileId, boolean reachable, String message);
 
     /**
-     * Checks whichever of a node's live/backup paths are non-blank and folds them into one
-     * combined result (a {@code LogSource} has one check status, not one per path). Never throws
+     * Checks whichever of a log output's live/backup paths are non-blank and folds them into one
+     * combined result (a {@code LogFile} has one check status, not one per path). Never throws
      * — an unreachable or unconfigured path is a normal outcome, not an error. If
-     * {@code logSourceId} is given, the combined result is also recorded onto that row via
-     * {@link #recordLogSourceCheck}.
+     * {@code logFileId} is given, the combined result is also recorded onto that row via
+     * {@link #recordLogFileCheck}.
      */
-    PathCheckOutcome checkPaths(String livePath, String backupPath, UUID logSourceId);
+    PathCheckOutcome checkPaths(String livePath, String backupPath, UUID logFileId);
 }

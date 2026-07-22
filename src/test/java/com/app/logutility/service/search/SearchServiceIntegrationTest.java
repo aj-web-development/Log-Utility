@@ -2,6 +2,7 @@ package com.app.logutility.service.search;
 
 import com.app.logutility.entity.project.MatchType;
 import com.app.logutility.request.project.FilterFieldForm;
+import com.app.logutility.request.project.LogFileForm;
 import com.app.logutility.request.project.NodeForm;
 import com.app.logutility.service.project.ProjectService;
 import com.app.logutility.request.project.ProjectWizardForm;
@@ -47,6 +48,8 @@ class SearchServiceIntegrationTest {
     private UUID projectId;
     private Path liveLog;
     private Path archiveDir;
+    private LocalDateTime dayA;
+    private LocalDateTime dayB;
 
     @BeforeEach
     void setUp() throws IOException {
@@ -60,22 +63,27 @@ class SearchServiceIntegrationTest {
                 line(today.plusMinutes(1), "ERROR", "tid=live2 payment failed"),
                 "    at com.acme.Pay.charge(Pay.java:88)")); // continuation line, no timestamp
 
-        // Rotated backups: two past days as .gz, named with the {date} the pruner expects.
-        LocalDateTime dayA = LocalDateTime.of(2026, 6, 1, 9, 0, 0);
-        writeGz(archiveDir.resolve("app.2026-06-01.0.log.gz"), List.of(
+        // Rotated backups: two past days as .gz, named with the {date} the pruner expects. Kept
+        // relative to "now" (not a fixed calendar date) so the fixture never drifts outside
+        // search.max-date-range-days as real time passes.
+        dayA = today.minusDays(2).withHour(9);
+        writeGz(archiveDir.resolve("app.%s.0.log.gz".formatted(dayA.toLocalDate())), List.of(
                 line(dayA, "INFO", "tid=old1 startup"),
                 line(dayA.plusHours(1), "WARN", "tid=old2 retrying")));
-        LocalDateTime dayB = LocalDateTime.of(2026, 6, 2, 9, 0, 0);
-        writeGz(archiveDir.resolve("app.2026-06-02.0.log.gz"), List.of(
+        dayB = today.minusDays(1).withHour(9);
+        writeGz(archiveDir.resolve("app.%s.0.log.gz".formatted(dayB.toLocalDate())), List.of(
                 line(dayB, "INFO", "tid=old3 processed order")));
 
         ProjectWizardForm form = new ProjectWizardForm();
         form.setName("search-it-" + UUID.randomUUID());
         NodeForm node = new NodeForm();
         node.setNodeLabel("node1");
-        node.setLiveLogPath(liveLog.toString());
-        node.setBackupRootPath(archiveDir.toString());
-        node.setBackupPathPattern("app.{date}.{i}.log.gz");
+        LogFileForm output = new LogFileForm();
+        output.setFileLabel("Application");
+        output.setLiveLogPath(liveLog.toString());
+        output.setBackupRootPath(archiveDir.toString());
+        output.setBackupPathPattern("app.{date}.{i}.log.gz");
+        node.getLogFiles().add(output);
         form.getNodes().add(node);
         FilterFieldForm tid = new FilterFieldForm();
         tid.setKey("tid");
@@ -91,16 +99,17 @@ class SearchServiceIntegrationTest {
     void searchesAcrossLiveAndRotatedFilesAndSortsByTimestamp() {
         SearchResult result = searchService.search(new SearchRequest(
                 projectId,
-                LocalDateTime.of(2026, 6, 1, 0, 0),
+                dayA.toLocalDate().atStartOfDay(),
                 LocalDateTime.now().plusDays(1),
                 Map.of(), "", 0, 0));
 
-        // 5 timestamped matches (3 backup + 2 live); the continuation line has no timestamp and
-        // no filter, so with an empty predicate it is still included -> assert the timestamped ones.
+        // 5 entries (3 backup + 2 live); the stack-trace continuation line has no timestamp of its
+        // own, so it is folded into the preceding tid=live2 entry rather than becoming a 6th one.
         assertThat(result.lines()).extracting(LogLine::raw)
                 .anyMatch(l -> l.contains("tid=old1"))
                 .anyMatch(l -> l.contains("tid=old3"))
-                .anyMatch(l -> l.contains("tid=live2"));
+                .anyMatch(l -> l.contains("tid=live2") && l.contains("Pay.charge"));
+        assertThat(result.lines()).hasSize(5);
         assertThat(result.unreachableNodes()).isEmpty();
         assertThat(result.truncated()).isFalse();
 
@@ -112,11 +121,11 @@ class SearchServiceIntegrationTest {
 
     @Test
     void datePruningExcludesOutOfRangeBackupDays() {
-        // Range covers only 2026-06-02: the 2026-06-01 backup file must be pruned entirely.
+        // Range covers only dayB: the dayA backup file must be pruned entirely.
         SearchResult result = searchService.search(new SearchRequest(
                 projectId,
-                LocalDateTime.of(2026, 6, 2, 0, 0),
-                LocalDateTime.of(2026, 6, 2, 23, 59),
+                dayB.toLocalDate().atStartOfDay(),
+                dayB.toLocalDate().atTime(23, 59),
                 Map.of(), "", 0, 0));
 
         assertThat(result.lines()).extracting(LogLine::raw)
@@ -129,7 +138,7 @@ class SearchServiceIntegrationTest {
     void exactTokenFilterMatchesOneLine() {
         SearchResult result = searchService.search(new SearchRequest(
                 projectId,
-                LocalDateTime.of(2026, 6, 1, 0, 0),
+                dayA.toLocalDate().atStartOfDay(),
                 LocalDateTime.now().plusDays(1),
                 Map.of("tid", "old2"), "", 0, 0));
 
@@ -142,7 +151,7 @@ class SearchServiceIntegrationTest {
     void freeTextFilterIsCaseInsensitive() {
         SearchResult result = searchService.search(new SearchRequest(
                 projectId,
-                LocalDateTime.of(2026, 6, 1, 0, 0),
+                dayA.toLocalDate().atStartOfDay(),
                 LocalDateTime.now().plusDays(1),
                 Map.of(), "PAYMENT", 0, 0));
 
@@ -151,20 +160,50 @@ class SearchServiceIntegrationTest {
     }
 
     @Test
+    void searchesAcrossMultipleLogFilesUnderOneNode() throws IOException {
+        // Add a second, independently configured output ("Error") to the existing node.
+        Path errorLog = tempDir.resolve("error.log");
+        LocalDateTime today = LocalDateTime.now().withHour(10).withMinute(0).withSecond(0).withNano(0);
+        writePlain(errorLog, List.of(line(today.plusMinutes(2), "ERROR", "tid=err1 disk full")));
+
+        ProjectWizardForm form = projectService.loadForEdit(projectId);
+        LogFileForm errorOutput = new LogFileForm();
+        errorOutput.setFileLabel("Error");
+        errorOutput.setLiveLogPath(errorLog.toString());
+        form.getNodes().get(0).getLogFiles().add(errorOutput);
+        projectService.saveFromWizard(form);
+
+        SearchResult result = searchService.search(new SearchRequest(
+                projectId,
+                dayA.toLocalDate().atStartOfDay(),
+                LocalDateTime.now().plusDays(1),
+                Map.of(), "", 0, 0));
+
+        assertThat(result.lines()).extracting(LogLine::fileLabel)
+                .contains("Application", "Error");
+        LogLine errLine = result.lines().stream()
+                .filter(l -> l.raw().contains("tid=err1")).findFirst().orElseThrow();
+        assertThat(errLine.nodeLabel()).isEqualTo("node1");
+        assertThat(errLine.fileLabel()).isEqualTo("Error");
+    }
+
+    @Test
     void unreachableNodeIsReportedNotFatal() {
         // Add a second node pointing at nonexistent paths, then search.
         ProjectWizardForm form = projectService.loadForEdit(projectId);
         NodeForm ghost = new NodeForm();
         ghost.setNodeLabel("ghost");
-        ghost.setLiveLogPath(tempDir.resolve("nope/app.log").toString());
-        ghost.setBackupRootPath(tempDir.resolve("nope-archive").toString());
-        ghost.setBackupPathPattern("app.{date}.{i}.log.gz");
+        LogFileForm ghostOutput = new LogFileForm();
+        ghostOutput.setLiveLogPath(tempDir.resolve("nope/app.log").toString());
+        ghostOutput.setBackupRootPath(tempDir.resolve("nope-archive").toString());
+        ghostOutput.setBackupPathPattern("app.{date}.{i}.log.gz");
+        ghost.getLogFiles().add(ghostOutput);
         form.getNodes().add(ghost);
         projectService.saveFromWizard(form);
 
         SearchResult result = searchService.search(new SearchRequest(
                 projectId,
-                LocalDateTime.of(2026, 6, 1, 0, 0),
+                dayA.toLocalDate().atStartOfDay(),
                 LocalDateTime.now().plusDays(1),
                 Map.of("tid", "old1"), "", 0, 0));
 

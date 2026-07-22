@@ -1,5 +1,6 @@
 package com.app.logutility.service.search;
 
+import com.app.logutility.request.project.LogFileForm;
 import com.app.logutility.request.project.NodeForm;
 import com.app.logutility.service.project.ProjectService;
 import com.app.logutility.request.project.ProjectWizardForm;
@@ -52,7 +53,9 @@ class SearchServiceCapTest {
         form.setName("cap-test-" + UUID.randomUUID());
         NodeForm node = new NodeForm();
         node.setNodeLabel("node1");
-        node.setLiveLogPath(liveLog.toString());
+        LogFileForm output = new LogFileForm();
+        output.setLiveLogPath(liveLog.toString());
+        node.getLogFiles().add(output);
         form.getNodes().add(node);
         UUID projectId = projectService.saveFromWizard(form);
 

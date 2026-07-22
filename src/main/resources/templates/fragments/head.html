@@ -13,10 +13,31 @@
     <meta name="_csrf" th:if="${_csrf}" th:content="${_csrf.token}"/>
     <meta name="_csrf_header" th:if="${_csrf}" th:content="${_csrf.headerName}"/>
 
+    <script>
+        // Runs synchronously, before Tailwind loads and before first paint, so there's no
+        // flash of the wrong theme. Preference is client-only (localStorage) - no cookie/
+        // server round trip needed for something this purely cosmetic.
+        (function () {
+            var stored = localStorage.getItem('theme');
+            var dark = stored ? stored === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+            document.documentElement.classList.toggle('dark', dark);
+        })();
+    </script>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        // Must run AFTER the CDN script has loaded: it initializes window.tailwind itself, so
+        // setting tailwind.config any earlier gets overwritten rather than read.
+        tailwind.config = { darkMode: 'class' };
+    </script>
     <script src="https://unpkg.com/htmx.org@2.0.3"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
     <script>
+        function toggleTheme() {
+            var dark = !document.documentElement.classList.contains('dark');
+            document.documentElement.classList.toggle('dark', dark);
+            localStorage.setItem('theme', dark ? 'dark' : 'light');
+        }
+
         document.addEventListener('DOMContentLoaded', function () {
             var token = document.querySelector('meta[name="_csrf"]');
             var header = document.querySelector('meta[name="_csrf_header"]');
@@ -25,15 +46,60 @@
                     evt.detail.headers[header.content] = token.content;
                 });
             }
+
+            // App-wide swap animation: every HTMX-swapped region fades/slides in the same way,
+            // with zero per-template wiring (no hx-swap modifiers to keep in sync everywhere).
+            // Must be attached inside DOMContentLoaded - this script runs in <head>, before
+            // document.body exists.
+            document.body.addEventListener('htmx:afterSwap', function (evt) {
+                var el = evt.detail.target;
+                el.classList.add('fade-in-up');
+                el.addEventListener('animationend', function handler() {
+                    el.classList.remove('fade-in-up');
+                    el.removeEventListener('animationend', handler);
+                });
+            });
         });
     </script>
     <style>
         /* htmx's loading-indicator convention: elements with this class are hidden by default
-           and shown while their triggering request is in flight (via hx-indicator). */
-        .htmx-indicator { opacity: 0; transition: opacity 150ms ease-in; }
+           and shown while their triggering request is in flight (via hx-indicator).
+           pointer-events: none is required, not decoration - opacity: 0 alone still leaves the
+           element hit-testable, so an absolutely-positioned indicator (like #results-skeleton,
+           which stretches over the real results via inset-0) silently swallows clicks meant for
+           the content underneath even while invisible. */
+        .htmx-indicator { opacity: 0; pointer-events: none; transition: opacity 150ms ease-in; }
         .htmx-request.htmx-indicator, .htmx-request .htmx-indicator { opacity: 1; }
         /* Alpine's convention to prevent a flash of un-toggled content before it initializes. */
         [x-cloak] { display: none !important; }
+
+        /* Smooth crossfade when the theme toggles, instead of an abrupt color snap. */
+        html { transition: background-color 300ms ease, color 300ms ease; }
+        .bg-white, [class*="bg-slate-"], [class*="border-"] {
+            transition: background-color 300ms ease, border-color 300ms ease, color 200ms ease;
+        }
+
+        /* Entrance animation applied to every htmx-swapped region, see htmx:afterSwap above. */
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(4px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .fade-in-up { animation: fadeInUp 250ms ease-out; }
     </style>
 </head>
+<body>
+<!-- Sun/moon icon swap is free via the `dark` class already on <html> - no toggle-time JS
+     needed for the icon itself, only for flipping the class (see toggleTheme() above). -->
+<button th:fragment="themeToggle" type="button" onclick="toggleTheme()"
+        title="Toggle dark / light theme"
+        class="rounded p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-800 transition-colors duration-150
+               dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-slate-100">
+    <svg class="w-5 h-5 dark:hidden" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M12 3a1 1 0 0 1 1 1v1a1 1 0 1 1-2 0V4a1 1 0 0 1 1-1zm0 5a4 4 0 1 1 0 8 4 4 0 0 1 0-8zm9 4a1 1 0 0 1-1 1h-1a1 1 0 1 1 0-2h1a1 1 0 0 1 1 1zM4 13a1 1 0 0 1 0-2h1a1 1 0 1 1 0 2H4zm14.657-6.657a1 1 0 0 1 0 1.414l-.707.707a1 1 0 1 1-1.414-1.414l.707-.707a1 1 0 0 1 1.414 0zM6.343 17.657a1 1 0 0 1 0 1.414l-.707.707a1 1 0 1 1-1.414-1.414l.707-.707a1 1 0 0 1 1.414 0zM12 19a1 1 0 0 1 1 1v1a1 1 0 1 1-2 0v-1a1 1 0 0 1 1-1zm6.657 1.657a1 1 0 0 1-1.414 0l-.707-.707a1 1 0 1 1 1.414-1.414l.707.707a1 1 0 0 1 0 1.414zM5.636 6.343a1 1 0 0 1-1.414 0l-.707-.707A1 1 0 1 1 4.93 4.222l.707.707a1 1 0 0 1 0 1.414z"/>
+    </svg>
+    <svg class="hidden w-5 h-5 dark:block" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M21.64 13a1 1 0 0 0-1.05-.14 8.05 8.05 0 0 1-3.37.73 8.15 8.15 0 0 1-8.14-8.1 8.59 8.59 0 0 1 .25-2A1 1 0 0 0 8 2.36a10.14 10.14 0 1 0 13.69 12.15 1 1 0 0 0-.05-1.51z"/>
+    </svg>
+</button>
+</body>
 </html>

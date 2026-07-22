@@ -84,7 +84,7 @@ class ProjectWizardControllerTest {
 
         mvc.perform(post("/admin/projects/wizard/nodes").session(session).with(csrf())
                         .param("nodes[0].nodeLabel", "node1")
-                        .param("nodes[0].liveLogPath", "/var/log/app.log"))
+                        .param("nodes[0].logFiles[0].liveLogPath", "/var/log/app.log"))
                 .andExpect(status().isOk())
                 .andExpect(content().string(containsString("<h2 class=\"font-semibold\">Sample line</h2>")))
                 .andExpect(content().string(not(containsString("<h2 class=\"font-semibold\">Nodes</h2>"))))

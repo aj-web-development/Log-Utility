@@ -27,6 +27,7 @@ import java.util.List;
 import java.util.UUID;
 import com.app.logutility.request.project.FilterFieldForm;
 import com.app.logutility.request.project.LinePatternForm;
+import com.app.logutility.request.project.LogFileForm;
 import com.app.logutility.request.project.NodeForm;
 import com.app.logutility.request.project.ProjectWizardForm;
 import com.app.logutility.response.project.PathCheckOutcome;
@@ -62,7 +63,7 @@ public class ProjectWizardController {
     @GetMapping("/new")
     public String startNew(HttpSession session, Model model) {
         ProjectWizardForm draft = new ProjectWizardForm();
-        draft.getNodes().add(new NodeForm());
+        draft.getNodes().add(newNode());
         draft.getFilterFields().add(new FilterFieldForm());
         session.setAttribute(DRAFT_KEY, draft);
         populate(model, draft, WizardStep.DETAILS);
@@ -73,7 +74,12 @@ public class ProjectWizardController {
     public String startEdit(@PathVariable UUID id, HttpSession session, Model model) {
         ProjectWizardForm draft = projectService.loadForEdit(id);
         if (draft.getNodes().isEmpty()) {
-            draft.getNodes().add(new NodeForm());
+            draft.getNodes().add(newNode());
+        }
+        for (NodeForm node : draft.getNodes()) {
+            if (node.getLogFiles().isEmpty()) {
+                node.getLogFiles().add(new LogFileForm());
+            }
         }
         if (draft.getFilterFields().isEmpty()) {
             draft.getFilterFields().add(new FilterFieldForm());
@@ -120,7 +126,9 @@ public class ProjectWizardController {
 
         ProjectWizardForm draft = new ProjectWizardForm();
         NodeForm node = new NodeForm();
-        node.setBackupPathPattern(parsed.backupPathPattern());
+        LogFileForm output = new LogFileForm();
+        output.setBackupPathPattern(parsed.backupPathPattern());
+        node.getLogFiles().add(output);
         draft.getNodes().add(node);
         draft.setUploadLiveLogHint(parsed.liveLogPathHint());
         draft.setUploadBackupRootHint(parsed.backupRootHint());
@@ -164,7 +172,7 @@ public class ProjectWizardController {
     public String addNode(@ModelAttribute ProjectWizardForm submitted, HttpSession session, Model model) {
         ProjectWizardForm draft = draft(session);
         draft.setNodes(nonNull(submitted.getNodes()));
-        draft.getNodes().add(new NodeForm());
+        draft.getNodes().add(newNode());
         return step(session, model, draft, WizardStep.NODES, null);
     }
 
@@ -177,29 +185,57 @@ public class ProjectWizardController {
             draft.getNodes().remove(index);
         }
         if (draft.getNodes().isEmpty()) {
-            draft.getNodes().add(new NodeForm());
+            draft.getNodes().add(newNode());
+        }
+        return step(session, model, draft, WizardStep.NODES, null);
+    }
+
+    @PostMapping("/wizard/nodes/{nodeIndex}/outputs/add")
+    public String addLogFile(@PathVariable int nodeIndex, @ModelAttribute ProjectWizardForm submitted,
+                             HttpSession session, Model model) {
+        ProjectWizardForm draft = draft(session);
+        draft.setNodes(nonNull(submitted.getNodes()));
+        if (nodeIndex >= 0 && nodeIndex < draft.getNodes().size()) {
+            draft.getNodes().get(nodeIndex).getLogFiles().add(new LogFileForm());
+        }
+        return step(session, model, draft, WizardStep.NODES, null);
+    }
+
+    @PostMapping("/wizard/nodes/{nodeIndex}/outputs/remove")
+    public String removeLogFile(@PathVariable int nodeIndex, @RequestParam int index,
+                                @ModelAttribute ProjectWizardForm submitted, HttpSession session, Model model) {
+        ProjectWizardForm draft = draft(session);
+        draft.setNodes(nonNull(submitted.getNodes()));
+        if (nodeIndex >= 0 && nodeIndex < draft.getNodes().size()) {
+            List<LogFileForm> outputs = draft.getNodes().get(nodeIndex).getLogFiles();
+            if (index >= 0 && index < outputs.size()) {
+                outputs.remove(index);
+            }
+            if (outputs.isEmpty()) {
+                outputs.add(new LogFileForm());
+            }
         }
         return step(session, model, draft, WizardStep.NODES, null);
     }
 
     /**
-     * Backs each node row's single "Test paths" button. {@code LogSource} has one combined
+     * Backs each log-output row's single "Test paths" button. {@code LogFile} has one combined
      * check result (not one per path), so both the live and backup paths — whichever are
      * non-blank — are checked and folded into one status/message. Stateless with respect to the
      * wizard draft (it checks whatever the browser currently holds); if the row corresponds to an
-     * already-persisted {@code LogSource} ({@code logSourceId} present), the combined result is
+     * already-persisted {@code LogFile} ({@code logFileId} present), the combined result is
      * also recorded on that row for later display. Never fails the request even when a path is
      * unreachable — it always renders a status badge.
      */
     @PostMapping("/wizard/nodes/test-path")
     public String testPath(@RequestParam(required = false) String livePath,
                            @RequestParam(required = false) String backupPath,
-                           @RequestParam(required = false) String logSourceId,
+                           @RequestParam(required = false) String logFileId,
                            Model model) {
-        // logSourceId is only passed once the row backs an already-persisted LogSource; checkPaths
-        // records the combined result onto it in that case (see ProjectService#recordLogSourceCheck).
-        UUID sourceId = (logSourceId != null && !logSourceId.isBlank()) ? UUID.fromString(logSourceId) : null;
-        PathCheckOutcome outcome = projectService.checkPaths(livePath, backupPath, sourceId);
+        // logFileId is only passed once the row backs an already-persisted LogFile; checkPaths
+        // records the combined result onto it in that case (see ProjectService#recordLogFileCheck).
+        UUID fileId = (logFileId != null && !logFileId.isBlank()) ? UUID.fromString(logFileId) : null;
+        PathCheckOutcome outcome = projectService.checkPaths(livePath, backupPath, fileId);
         model.addAttribute("status", outcome.status().name());
         model.addAttribute("message", outcome.message());
         return "admin/projects/path-badge :: badge";
@@ -351,6 +387,13 @@ public class ProjectWizardController {
         model.addAttribute("steps", WizardStep.values());
         model.addAttribute("matchTypes", MatchType.values());
         model.addAttribute("analysis", sampleLineAnalyzer.analyze(draft.getLinePattern().getSampleLine()));
+    }
+
+    /** A blank node row always starts with one blank output row, mirroring the node-level guard. */
+    private static NodeForm newNode() {
+        NodeForm node = new NodeForm();
+        node.getLogFiles().add(new LogFileForm());
+        return node;
     }
 
     private static <T> List<T> nonNull(List<T> list) {

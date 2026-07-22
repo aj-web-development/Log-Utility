@@ -3,6 +3,7 @@ package com.app.logutility.controller.search;
 import tools.jackson.databind.ObjectMapper;
 import com.app.logutility.entity.project.MatchType;
 import com.app.logutility.request.project.FilterFieldForm;
+import com.app.logutility.request.project.LogFileForm;
 import com.app.logutility.request.project.NodeForm;
 import com.app.logutility.request.project.ProjectWizardForm;
 import com.app.logutility.service.project.ProjectService;
@@ -134,7 +135,9 @@ class SearchApiControllerTest {
         NodeForm node = new NodeForm();
         node.setNodeLabel("node1");
         if (liveLogPath != null) {
-            node.setLiveLogPath(liveLogPath);
+            LogFileForm output = new LogFileForm();
+            output.setLiveLogPath(liveLogPath);
+            node.getLogFiles().add(output);
         }
         form.getNodes().add(node);
 

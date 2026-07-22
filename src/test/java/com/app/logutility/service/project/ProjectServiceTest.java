@@ -10,10 +10,10 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import com.app.logutility.entity.project.CheckStatus;
 import com.app.logutility.entity.project.LinePattern;
 import com.app.logutility.request.project.FilterFieldForm;
 import com.app.logutility.request.project.LinePatternForm;
+import com.app.logutility.request.project.LogFileForm;
 import com.app.logutility.request.project.NodeForm;
 import com.app.logutility.request.project.ProjectWizardForm;
 import com.app.logutility.response.project.ProjectSummaryDto;
@@ -37,8 +37,11 @@ class ProjectServiceTest {
 
         NodeForm node = new NodeForm();
         node.setNodeLabel("node1");
-        node.setLiveLogPath("/var/log/app.log");
-        node.setBackupPathPattern("{date}/app.{HH}.{i}.log.gz");
+        LogFileForm output = new LogFileForm();
+        output.setLiveLogPath("/var/log/app.log");
+        output.setBackupPathPattern("{date}/app.{HH}.{i}.log.gz");
+        node.getLogFiles().add(output);
+        node.getLogFiles().add(new LogFileForm()); // empty trailing output row -> skipped
         form.getNodes().add(node);
         form.getNodes().add(new NodeForm()); // empty trailing row -> skipped
 
@@ -77,25 +80,57 @@ class ProjectServiceTest {
         assertThat(form.getFilterFields().get(0).getMatchType()).isEqualTo(MatchType.EXACT_TOKEN);
         assertThat(form.getFilterFields().get(0).getLinePrefix()).isEqualTo("tid=");
         assertThat(form.getNodes().get(0).getLogSourceId()).isNotNull();
-        assertThat(form.getNodes().get(0).getLastCheckStatus()).isEqualTo(com.app.logutility.entity.project.CheckStatus.UNKNOWN);
+        assertThat(form.getNodes().get(0).getLogFiles()).hasSize(1);
+        assertThat(form.getNodes().get(0).getLogFiles().get(0).getLiveLogPath()).isEqualTo("/var/log/app.log");
+        assertThat(form.getNodes().get(0).getLogFiles().get(0).getLogFileId()).isNotNull();
+        assertThat(form.getNodes().get(0).getLogFiles().get(0).getLastCheckStatus())
+                .isEqualTo(com.app.logutility.entity.project.CheckStatus.UNKNOWN);
     }
 
     @Test
-    void recordLogSourceCheckUpdatesNodeForDisplay() {
+    void nodeCanHaveMultipleLabeledOutputs() {
+        ProjectWizardForm form = new ProjectWizardForm();
+        form.setName("svc-multi-output");
+        NodeForm node = new NodeForm();
+        node.setNodeLabel("node1");
+        LogFileForm app = new LogFileForm();
+        app.setFileLabel("Application");
+        app.setLiveLogPath("/var/log/app.log");
+        LogFileForm error = new LogFileForm();
+        error.setFileLabel("Error");
+        error.setLiveLogPath("/var/log/error.log");
+        node.getLogFiles().add(app);
+        node.getLogFiles().add(error);
+        form.getNodes().add(node);
+
+        UUID id = projectService.saveFromWizard(form);
+
+        NodeForm reloaded = projectService.loadForEdit(id).getNodes().get(0);
+        assertThat(reloaded.getLogFiles()).hasSize(2);
+        assertThat(reloaded.getLogFiles()).extracting(LogFileForm::getFileLabel)
+                .containsExactlyInAnyOrder("Application", "Error");
+        assertThat(reloaded.getLogFiles()).extracting(LogFileForm::getLiveLogPath)
+                .containsExactlyInAnyOrder("/var/log/app.log", "/var/log/error.log");
+        assertThat(reloaded.getLogFiles().stream().map(LogFileForm::getLogFileId))
+                .doesNotContainNull().doesNotHaveDuplicates();
+    }
+
+    @Test
+    void recordLogFileCheckUpdatesOutputForDisplay() {
         UUID projectId = projectService.saveFromWizard(sampleForm("svc-check"));
-        UUID logSourceId = projectService.loadForEdit(projectId).getNodes().get(0).getLogSourceId();
+        UUID logFileId = projectService.loadForEdit(projectId).getNodes().get(0).getLogFiles().get(0).getLogFileId();
 
-        projectService.recordLogSourceCheck(logSourceId, true, "Reachable — 3 entries");
+        projectService.recordLogFileCheck(logFileId, true, "Reachable — 3 entries");
 
-        NodeForm reloaded = projectService.loadForEdit(projectId).getNodes().get(0);
+        LogFileForm reloaded = projectService.loadForEdit(projectId).getNodes().get(0).getLogFiles().get(0);
         assertThat(reloaded.getLastCheckStatus()).isEqualTo(com.app.logutility.entity.project.CheckStatus.REACHABLE);
         assertThat(reloaded.getLastCheckMessage()).isEqualTo("Reachable — 3 entries");
     }
 
     @Test
-    void recordLogSourceCheckIsNoOpForUnknownId() {
-        // Must never throw — a stale/removed node's check result is simply dropped.
-        projectService.recordLogSourceCheck(UUID.randomUUID(), false, "Path does not exist");
+    void recordLogFileCheckIsNoOpForUnknownId() {
+        // Must never throw — a stale/removed output's check result is simply dropped.
+        projectService.recordLogFileCheck(UUID.randomUUID(), false, "Path does not exist");
     }
 
     @Test

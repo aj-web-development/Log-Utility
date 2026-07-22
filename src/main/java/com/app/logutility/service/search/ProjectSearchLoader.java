@@ -32,6 +32,7 @@ public class ProjectSearchLoader {
         // Force-initialise the associations while the session is open; only scalar getters are
         // read afterwards, so the detached copies are safe to use across the async boundary.
         List<LogSource> nodes = List.copyOf(project.getLogSources());
+        nodes.forEach(node -> node.getLogFiles().size()); // hydrate each node's outputs too
         List<FilterField> fields = List.copyOf(project.getFilterFields());
         LinePattern linePattern = project.getLinePattern();
         if (linePattern != null) {

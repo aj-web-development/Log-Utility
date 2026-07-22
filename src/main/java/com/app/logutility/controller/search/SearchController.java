@@ -1,6 +1,7 @@
 package com.app.logutility.controller.search;
 
 import com.app.logutility.controller.project.ProjectAdminController;
+import com.app.logutility.exception.search.SearchOverloadedException;
 import com.app.logutility.service.project.ProjectService;
 import com.app.logutility.response.project.PublicProjectView;
 import com.app.logutility.request.search.SearchRequest;
@@ -89,8 +90,14 @@ public class SearchController {
             }
         }
 
-        SearchResult result = searchService.search(new SearchRequest(
-                projectId.get(), parseDateTime(from), parseDateTime(to), filters, freeText, page, PAGE_SIZE));
+        SearchResult result;
+        try {
+            result = searchService.search(new SearchRequest(
+                    projectId.get(), parseDateTime(from), parseDateTime(to), filters, freeText, page, PAGE_SIZE));
+        } catch (IllegalArgumentException | SearchOverloadedException e) {
+            model.addAttribute("error", e.getMessage());
+            return "search :: resultsFragment";
+        }
 
         model.addAttribute("result", result);
         model.addAttribute("page", page);

@@ -11,6 +11,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.app.logutility.entity.project.CheckStatus;
 import com.app.logutility.entity.project.FilterField;
 import com.app.logutility.entity.project.LinePattern;
+import com.app.logutility.entity.project.LogFile;
 import com.app.logutility.entity.project.LogSource;
 import com.app.logutility.entity.project.MatchType;
 import com.app.logutility.entity.project.Project;
@@ -36,9 +37,12 @@ class ProjectPersistenceTest {
 
         LogSource node = new LogSource();
         node.setNodeLabel("node1");
-        node.setLiveLogPath("/var/log/orders/app.log");
-        node.setBackupRootPath("/var/log/orders/archive");
-        node.setBackupPathPattern("{date}/app.{HH}.{i}.log.gz");
+        LogFile output = new LogFile();
+        output.setFileLabel("Application");
+        output.setLiveLogPath("/var/log/orders/app.log");
+        output.setBackupRootPath("/var/log/orders/archive");
+        output.setBackupPathPattern("{date}/app.{HH}.{i}.log.gz");
+        node.addLogFile(output);
         project.addLogSource(node);
 
         FilterField traceId = new FilterField();
@@ -57,7 +61,7 @@ class ProjectPersistenceTest {
         assertThat(id).isNotNull();
         assertThat(saved.getCreatedAt()).isNotNull();
         assertThat(saved.getUpdatedAt()).isNotNull();
-        assertThat(node.getLastCheckStatus()).isEqualTo(CheckStatus.UNKNOWN);
+        assertThat(output.getLastCheckStatus()).isEqualTo(CheckStatus.UNKNOWN);
 
         Project reloaded = projectRepository.findByIdWithFilterFields(id).orElseThrow();
         assertThat(reloaded.getName()).isEqualTo("orders-service");
@@ -67,7 +71,11 @@ class ProjectPersistenceTest {
 
         Project withSources = projectRepository.findByIdWithLogSources(id).orElseThrow();
         assertThat(withSources.getLogSources()).hasSize(1);
-        assertThat(withSources.getLogSources().get(0).getNodeLabel()).isEqualTo("node1");
+        LogSource reloadedNode = withSources.getLogSources().get(0);
+        assertThat(reloadedNode.getNodeLabel()).isEqualTo("node1");
+        assertThat(reloadedNode.getLogFiles()).hasSize(1);
+        assertThat(reloadedNode.getLogFiles().get(0).getFileLabel()).isEqualTo("Application");
+        assertThat(reloadedNode.getLogFiles().get(0).getLiveLogPath()).isEqualTo("/var/log/orders/app.log");
     }
 
     @Test

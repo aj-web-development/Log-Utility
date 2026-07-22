@@ -3,9 +3,10 @@ package com.app.logutility.service.project;
 import com.app.logutility.entity.project.CheckStatus;
 import com.app.logutility.entity.project.FilterField;
 import com.app.logutility.entity.project.LinePattern;
+import com.app.logutility.entity.project.LogFile;
 import com.app.logutility.entity.project.LogSource;
 import com.app.logutility.exception.project.ProjectNotFoundException;
-import com.app.logutility.repository.project.LogSourceRepository;
+import com.app.logutility.repository.project.LogFileRepository;
 import com.app.logutility.entity.project.MatchType;
 import com.app.logutility.entity.project.Project;
 import com.app.logutility.repository.project.ProjectRepository;
@@ -23,6 +24,7 @@ import java.util.Optional;
 import java.util.UUID;
 import com.app.logutility.request.project.FilterFieldForm;
 import com.app.logutility.request.project.LinePatternForm;
+import com.app.logutility.request.project.LogFileForm;
 import com.app.logutility.request.project.NodeForm;
 import com.app.logutility.request.project.ProjectWizardForm;
 import com.app.logutility.response.project.PathCheckOutcome;
@@ -35,7 +37,7 @@ import com.app.logutility.response.project.PublicProjectView;
 public class ProjectServiceImpl implements ProjectService {
 
     private final ProjectRepository projectRepository;
-    private final LogSourceRepository logSourceRepository;
+    private final LogFileRepository logFileRepository;
     private final PathAvailabilityChecker pathAvailabilityChecker;
 
     @Override
@@ -84,9 +86,17 @@ public class ProjectServiceImpl implements ProjectService {
             }
             LogSource node = new LogSource();
             node.setNodeLabel(trimToNull(nf.getNodeLabel()));
-            node.setLiveLogPath(trimToNull(nf.getLiveLogPath()));
-            node.setBackupRootPath(trimToNull(nf.getBackupRootPath()));
-            node.setBackupPathPattern(trimToNull(nf.getBackupPathPattern()));
+            for (LogFileForm lf : nf.getLogFiles()) {
+                if (isLogFileEmpty(lf)) {
+                    continue;
+                }
+                LogFile file = new LogFile();
+                file.setFileLabel(trimToNull(lf.getFileLabel()));
+                file.setLiveLogPath(trimToNull(lf.getLiveLogPath()));
+                file.setBackupRootPath(trimToNull(lf.getBackupRootPath()));
+                file.setBackupPathPattern(trimToNull(lf.getBackupPathPattern()));
+                node.addLogFile(file);
+            }
             project.addLogSource(node);
         }
 
@@ -134,12 +144,18 @@ public class ProjectServiceImpl implements ProjectService {
         for (LogSource node : project.getLogSources()) {
             NodeForm nf = new NodeForm();
             nf.setNodeLabel(node.getNodeLabel());
-            nf.setLiveLogPath(node.getLiveLogPath());
-            nf.setBackupRootPath(node.getBackupRootPath());
-            nf.setBackupPathPattern(node.getBackupPathPattern());
             nf.setLogSourceId(node.getId());
-            nf.setLastCheckStatus(node.getLastCheckStatus());
-            nf.setLastCheckMessage(node.getLastCheckMessage());
+            for (LogFile file : node.getLogFiles()) {
+                LogFileForm lf = new LogFileForm();
+                lf.setFileLabel(file.getFileLabel());
+                lf.setLiveLogPath(file.getLiveLogPath());
+                lf.setBackupRootPath(file.getBackupRootPath());
+                lf.setBackupPathPattern(file.getBackupPathPattern());
+                lf.setLogFileId(file.getId());
+                lf.setLastCheckStatus(file.getLastCheckStatus());
+                lf.setLastCheckMessage(file.getLastCheckMessage());
+                nf.getLogFiles().add(lf);
+            }
             form.getNodes().add(nf);
         }
         for (FilterField field : project.getFilterFields()) {
@@ -172,17 +188,17 @@ public class ProjectServiceImpl implements ProjectService {
 
     @Override
     @Transactional
-    public void recordLogSourceCheck(UUID logSourceId, boolean reachable, String message) {
-        logSourceRepository.findById(logSourceId).ifPresent(node -> {
-            node.setLastCheckedAt(Instant.now());
-            node.setLastCheckStatus(reachable ? CheckStatus.REACHABLE : CheckStatus.UNREACHABLE);
-            node.setLastCheckMessage(message);
+    public void recordLogFileCheck(UUID logFileId, boolean reachable, String message) {
+        logFileRepository.findById(logFileId).ifPresent(file -> {
+            file.setLastCheckedAt(Instant.now());
+            file.setLastCheckStatus(reachable ? CheckStatus.REACHABLE : CheckStatus.UNREACHABLE);
+            file.setLastCheckMessage(message);
         });
     }
 
     @Override
     @Transactional
-    public PathCheckOutcome checkPaths(String livePath, String backupPath, UUID logSourceId) {
+    public PathCheckOutcome checkPaths(String livePath, String backupPath, UUID logFileId) {
         List<String> parts = new ArrayList<>();
         boolean anyConfigured = false;
         boolean allReachable = true;
@@ -203,17 +219,22 @@ public class ProjectServiceImpl implements ProjectService {
         boolean reachable = anyConfigured && allReachable;
         String message = anyConfigured ? String.join("; ", parts) : "No paths configured";
 
-        if (logSourceId != null) {
-            recordLogSourceCheck(logSourceId, reachable, message);
+        if (logFileId != null) {
+            recordLogFileCheck(logFileId, reachable, message);
         }
         return new PathCheckOutcome(reachable ? CheckStatus.REACHABLE : CheckStatus.UNREACHABLE, message);
     }
 
     private static boolean isNodeEmpty(NodeForm nf) {
         return !StringUtils.hasText(nf.getNodeLabel())
-                && !StringUtils.hasText(nf.getLiveLogPath())
-                && !StringUtils.hasText(nf.getBackupRootPath())
-                && !StringUtils.hasText(nf.getBackupPathPattern());
+                && nf.getLogFiles().stream().allMatch(ProjectServiceImpl::isLogFileEmpty);
+    }
+
+    private static boolean isLogFileEmpty(LogFileForm lf) {
+        return !StringUtils.hasText(lf.getFileLabel())
+                && !StringUtils.hasText(lf.getLiveLogPath())
+                && !StringUtils.hasText(lf.getBackupRootPath())
+                && !StringUtils.hasText(lf.getBackupPathPattern());
     }
 
     private static String trimToNull(String value) {

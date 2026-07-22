@@ -5,17 +5,20 @@ import com.app.logutility.exception.parser.LogbackParseException;
 import com.app.logutility.request.parser.SampleLineRequest;
 import com.app.logutility.request.project.FilterFieldRequest;
 import com.app.logutility.request.project.LinePatternRequest;
+import com.app.logutility.request.project.LogFileRequest;
 import com.app.logutility.request.project.NodeRequest;
 import com.app.logutility.request.project.PathCheckRequest;
 import com.app.logutility.request.project.ProjectRequest;
 import com.app.logutility.request.project.FilterFieldForm;
 import com.app.logutility.request.project.LinePatternForm;
+import com.app.logutility.request.project.LogFileForm;
 import com.app.logutility.request.project.NodeForm;
 import com.app.logutility.request.project.ProjectWizardForm;
 import com.app.logutility.response.parser.LogbackParseResult;
 import com.app.logutility.response.parser.SampleLineAnalysis;
 import com.app.logutility.response.project.FilterFieldResponse;
 import com.app.logutility.response.project.LinePatternResponse;
+import com.app.logutility.response.project.LogFileResponse;
 import com.app.logutility.response.project.NodeResponse;
 import com.app.logutility.response.project.PathCheckOutcome;
 import com.app.logutility.response.project.ProjectDetailResponse;
@@ -133,9 +136,9 @@ public class ProjectApiController {
     }
 
     @PostMapping("/path-check")
-    @Operation(summary = "Check a live/backup path pair", description = "logSourceId is optional - pass it to also record the result onto that persisted node.")
+    @Operation(summary = "Check a live/backup path pair", description = "logFileId is optional - pass it to also record the result onto that persisted log output.")
     public PathCheckOutcome checkPath(@RequestBody PathCheckRequest request) {
-        return projectService.checkPaths(request.livePath(), request.backupPath(), request.logSourceId());
+        return projectService.checkPaths(request.livePath(), request.backupPath(), request.logFileId());
     }
 
     // ------------------------------------------------------------------ mapping helpers
@@ -165,9 +168,14 @@ public class ProjectApiController {
         for (NodeRequest nr : nonNull(request.nodes())) {
             NodeForm nf = new NodeForm();
             nf.setNodeLabel(nr.nodeLabel());
-            nf.setLiveLogPath(nr.liveLogPath());
-            nf.setBackupRootPath(nr.backupRootPath());
-            nf.setBackupPathPattern(nr.backupPathPattern());
+            for (LogFileRequest lr : nonNull(nr.logFiles())) {
+                LogFileForm lf = new LogFileForm();
+                lf.setFileLabel(lr.fileLabel());
+                lf.setLiveLogPath(lr.liveLogPath());
+                lf.setBackupRootPath(lr.backupRootPath());
+                lf.setBackupPathPattern(lr.backupPathPattern());
+                nf.getLogFiles().add(lf);
+            }
             form.getNodes().add(nf);
         }
 
@@ -195,9 +203,13 @@ public class ProjectApiController {
     private static ProjectDetailResponse toDetailResponse(ProjectWizardForm form) {
         List<NodeResponse> nodes = form.getNodes().stream()
                 .map(nf -> new NodeResponse(
-                        nf.getLogSourceId(), nf.getNodeLabel(), nf.getLiveLogPath(),
-                        nf.getBackupRootPath(), nf.getBackupPathPattern(),
-                        nf.getLastCheckStatus(), nf.getLastCheckMessage()))
+                        nf.getLogSourceId(), nf.getNodeLabel(),
+                        nf.getLogFiles().stream()
+                                .map(lf -> new LogFileResponse(
+                                        lf.getLogFileId(), lf.getFileLabel(), lf.getLiveLogPath(),
+                                        lf.getBackupRootPath(), lf.getBackupPathPattern(),
+                                        lf.getLastCheckStatus(), lf.getLastCheckMessage()))
+                                .toList()))
                 .toList();
 
         List<FilterFieldResponse> fields = form.getFilterFields().stream()

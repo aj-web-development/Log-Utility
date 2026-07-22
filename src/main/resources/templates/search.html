@@ -1,25 +1,28 @@
 <!DOCTYPE html>
 <html lang="en" xmlns:th="http://www.thymeleaf.org">
 <head th:replace="~{fragments/head :: head('Log Utility · Search')}"></head>
-<body class="bg-slate-100 min-h-screen text-slate-800">
-    <header class="bg-white border-b border-slate-200">
+<body class="bg-slate-100 dark:bg-slate-900 min-h-screen text-slate-800 dark:text-slate-100">
+    <header class="bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700">
         <div class="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
             <span class="font-semibold">Log Utility</span>
-            <a th:href="@{/admin}" class="text-sm text-slate-600 hover:text-slate-900">Admin &rarr;</a>
+            <div class="flex items-center gap-3">
+                <a th:href="@{/admin}" class="text-sm text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 transition-colors duration-150">Admin &rarr;</a>
+                <span th:replace="~{fragments/head :: themeToggle}"></span>
+            </div>
         </div>
     </header>
 
     <main class="max-w-5xl mx-auto px-4 py-6 space-y-4">
 
-        <div class="bg-white rounded-xl shadow p-8 text-center text-slate-500" th:if="${projects.isEmpty()}">
+        <div class="bg-white dark:bg-slate-800 rounded-xl shadow p-8 text-center text-slate-500 dark:text-slate-400" th:if="${projects.isEmpty()}">
             No projects have been configured yet.
         </div>
 
-        <div class="bg-white rounded-xl shadow p-4" th:unless="${projects.isEmpty()}">
+        <div class="bg-white dark:bg-slate-800 rounded-xl shadow p-4" th:unless="${projects.isEmpty()}">
             <form method="get" th:action="@{/search/select-project}" class="flex items-center gap-2">
-                <label class="text-sm text-slate-600" for="projectId">Project</label>
+                <label class="text-sm text-slate-600 dark:text-slate-400" for="projectId">Project</label>
                 <select id="projectId" name="projectId" onchange="this.form.submit()"
-                        class="border border-slate-300 rounded px-2 py-1 text-sm">
+                        class="border border-slate-300 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-2 py-1 text-sm">
                     <option value="" th:selected="${activeProject == null}">&mdash; choose a project &mdash;</option>
                     <option th:each="p : ${projects}" th:value="${p.id()}" th:text="${p.name()}"
                             th:selected="${activeProject != null and activeProject.id() == p.id()}"></option>
@@ -28,37 +31,42 @@
         </div>
 
         <form id="search-form" th:if="${activeProject != null}"
-              hx-get="/search" hx-target="#results" hx-swap="innerHTML" hx-indicator="#search-spinner"
-              class="bg-white rounded-xl shadow p-4 space-y-3">
+              hx-get="/search" hx-target="#results" hx-swap="innerHTML" hx-indicator="#search-spinner, #results-skeleton"
+              class="bg-white dark:bg-slate-800 rounded-xl shadow p-4 space-y-3">
             <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
                 <div>
-                    <label class="block text-xs text-slate-500 mb-1" for="from">From</label>
+                    <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1" for="from">From</label>
                     <input id="from" type="datetime-local" name="from"
                            th:value="${#temporals.format(defaultFrom, 'yyyy-MM-dd''T''HH:mm')}"
-                           class="w-full border border-slate-300 rounded px-2 py-1 text-sm"/>
+                           class="w-full border border-slate-300 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-2 py-1 text-sm"/>
                 </div>
                 <div>
-                    <label class="block text-xs text-slate-500 mb-1" for="to">To</label>
+                    <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1" for="to">To</label>
                     <input id="to" type="datetime-local" name="to"
                            th:value="${#temporals.format(defaultTo, 'yyyy-MM-dd''T''HH:mm')}"
-                           class="w-full border border-slate-300 rounded px-2 py-1 text-sm"/>
+                           class="w-full border border-slate-300 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-2 py-1 text-sm"/>
                 </div>
                 <div>
-                    <label class="block text-xs text-slate-500 mb-1" for="freeText">Free text</label>
+                    <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1" for="freeText">Free text</label>
                     <input id="freeText" type="text" name="freeText" placeholder="contains..."
-                           class="w-full border border-slate-300 rounded px-2 py-1 text-sm"/>
+                           class="w-full border border-slate-300 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-2 py-1 text-sm"/>
                 </div>
                 <div th:each="f : ${activeProject.fields()}">
-                    <label class="block text-xs text-slate-500 mb-1" th:text="${f.label()}"
+                    <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1" th:text="${f.label()}"
                            th:for="'filter_' + ${f.key()}">Field</label>
                     <input type="text" th:id="'filter_' + ${f.key()}" th:name="'filter_' + ${f.key()}"
-                           class="w-full border border-slate-300 rounded px-2 py-1 text-sm"/>
+                           class="w-full border border-slate-300 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-2 py-1 text-sm"/>
                 </div>
             </div>
             <input type="hidden" name="page" value="0"/>
+            <!-- /search itself reads the active project from a cookie, so this field is unused by
+                 that endpoint - it exists so downloadResults()'s FormData(#search-form) has a
+                 projectId to send to /api/search/export, which (unlike /search) requires it as an
+                 explicit request parameter. -->
+            <input type="hidden" name="projectId" th:value="${activeProject.id()}"/>
             <div class="flex items-center gap-3 pt-1">
                 <button type="submit"
-                        class="bg-slate-800 text-white text-sm rounded px-4 py-2 hover:bg-slate-700">Search</button>
+                        class="bg-slate-800 dark:bg-slate-700 text-white text-sm rounded px-4 py-2 hover:bg-slate-700 dark:hover:bg-slate-600 transition-colors duration-150">Search</button>
                 <svg id="search-spinner" class="htmx-indicator animate-spin h-5 w-5 text-slate-400"
                      xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                     <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
@@ -68,12 +76,28 @@
             </div>
         </form>
 
-        <div id="results">
-            <div th:if="${activeProject == null and !projects.isEmpty()}" class="text-center text-slate-400 py-12">
-                Choose a project above to begin searching.
+        <div class="relative">
+            <div id="results">
+                <div th:if="${activeProject == null and !projects.isEmpty()}" class="text-center text-slate-400 dark:text-slate-500 py-12">
+                    Choose a project above to begin searching.
+                </div>
+                <div th:if="${activeProject != null}" class="text-center text-slate-400 dark:text-slate-500 py-12">
+                    Enter your criteria and click Search.
+                </div>
             </div>
-            <div th:if="${activeProject != null}" class="text-center text-slate-400 py-12">
-                Enter your criteria and click Search.
+
+            <!-- Overlays #results while a search is in flight (see hx-indicator above); an
+                 opaque page-matching background so the previous results don't show through. -->
+            <div id="results-skeleton" class="htmx-indicator absolute inset-0 bg-slate-100 dark:bg-slate-900 space-y-2">
+                <div th:each="i : ${#numbers.sequence(1, 5)}"
+                     class="bg-white dark:bg-slate-800 rounded-xl shadow p-3 space-y-2 animate-pulse">
+                    <div class="flex items-center gap-2">
+                        <div class="h-3 w-32 bg-slate-200 dark:bg-slate-700 rounded"></div>
+                        <div class="h-3 w-14 bg-slate-200 dark:bg-slate-700 rounded"></div>
+                        <div class="h-3 w-20 bg-slate-200 dark:bg-slate-700 rounded"></div>
+                    </div>
+                    <div class="h-3 w-full bg-slate-200 dark:bg-slate-700 rounded"></div>
+                </div>
             </div>
         </div>
     </main>
@@ -81,79 +105,87 @@
     <!-- ============================================================= results partial
          Returned as-is by GET /search (an HTMX fragment response, swapped into #results). -->
     <div th:fragment="resultsFragment">
-        <div th:if="${error}" class="text-sm text-red-700 bg-red-50 border border-red-200 rounded p-2 mb-3"
+        <div th:if="${error}" class="text-sm text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded p-2 mb-3"
              th:text="${error}"></div>
 
         <div th:if="${result != null}">
-            <div class="flex items-center justify-between text-sm text-slate-500 mb-2">
+            <div class="flex items-center justify-between text-sm text-slate-500 dark:text-slate-400 mb-2">
                 <span th:text="${result.totalMatched()} + ' matches &middot; ' + ${result.elapsedMillis()} + 'ms'"></span>
+                <a th:if="${!result.lines().isEmpty()}" href="#" onclick="downloadResults(); return false;"
+                   class="text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100 hover:underline transition-colors duration-150">
+                    &darr; Download
+                </a>
             </div>
 
             <div th:if="${!result.unreachableNodes().isEmpty()}" x-data="{ show: true }" x-show="show" x-cloak
-                 class="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded p-2 mb-3">
+                 class="text-sm text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 rounded p-2 mb-3">
                 Results may be incomplete &mdash;
                 <span th:text="${#strings.listJoin(result.unreachableNodes(), ', ')}"></span> could not be reached.
-                <button type="button" @click="show = false" class="ml-2 text-amber-900 underline text-xs">Dismiss</button>
+                <button type="button" @click="show = false" class="ml-2 text-amber-900 dark:text-amber-200 underline text-xs">Dismiss</button>
             </div>
 
             <div th:if="${result.truncated()}"
-                 class="text-sm text-blue-800 bg-blue-50 border border-blue-200 rounded p-2 mb-3">
+                 class="text-sm text-blue-800 dark:text-blue-300 bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 rounded p-2 mb-3">
                 Showing the first <span th:text="${result.totalMatched()}"></span> results &mdash; narrow your search
                 for a complete view.
             </div>
 
-            <div th:if="${result.lines().isEmpty()}" class="text-center text-slate-400 py-12 bg-white rounded-xl shadow">
+            <div th:if="${result.lines().isEmpty()}" class="text-center text-slate-400 dark:text-slate-500 py-12 bg-white dark:bg-slate-800 rounded-xl shadow">
                 No results found for this search.
             </div>
 
-            <table th:unless="${result.lines().isEmpty()}"
-                   class="w-full bg-white rounded-xl shadow overflow-hidden text-sm">
-                <thead class="bg-slate-50 text-slate-500 text-left">
-                    <tr>
-                        <th class="px-3 py-2 font-medium">Timestamp</th>
-                        <th class="px-3 py-2 font-medium">Level</th>
-                        <th class="px-3 py-2 font-medium">Node</th>
-                        <th class="px-3 py-2 font-medium">Message</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr th:each="line : ${result.lines()}" x-data="{ expanded: false }"
-                        class="border-t border-slate-100 align-top">
-                        <td class="px-3 py-2 whitespace-nowrap text-slate-500"
-                            th:text="${line.timestamp() != null ? #temporals.format(line.timestamp(), 'yyyy-MM-dd HH:mm:ss') : '—'}"></td>
-                        <td class="px-3 py-2">
-                            <span class="text-xs rounded px-2 py-0.5"
-                                  th:classappend="${line.level() == 'ERROR' or line.level() == 'FATAL'} ? 'bg-red-100 text-red-700' : (${line.level() == 'WARN' or line.level() == 'WARNING'} ? 'bg-amber-100 text-amber-700' : (${line.level() == 'INFO'} ? 'bg-blue-100 text-blue-700' : (${line.level() == 'DEBUG' or line.level() == 'TRACE'} ? 'bg-slate-100 text-slate-600' : 'bg-slate-100 text-slate-400')))"
-                                  th:text="${line.level() != null ? line.level() : '—'}"></span>
-                        </td>
-                        <td class="px-3 py-2 text-slate-500" th:text="${line.nodeLabel()}"></td>
-                        <td class="px-3 py-2 max-w-xl">
-                            <div @click="expanded = !expanded" class="cursor-pointer">
-                                <span x-show="!expanded" th:text="${#strings.abbreviate(line.raw(), 150)}"></span>
-                                <span x-show="expanded" x-cloak class="whitespace-pre-wrap break-all"
-                                      th:text="${line.raw()}"></span>
-                            </div>
-                        </td>
-                    </tr>
-                </tbody>
-            </table>
+            <div th:unless="${result.lines().isEmpty()}" class="space-y-2">
+                <div th:each="line : ${result.lines()}" x-data="{ expanded: false }"
+                     class="bg-white dark:bg-slate-800 rounded-xl shadow p-3 text-sm">
+                    <div class="flex flex-wrap items-center gap-2 mb-1.5">
+                        <span class="font-mono text-xs text-slate-500 dark:text-slate-400"
+                              th:text="${line.timestamp() != null ? #temporals.format(line.timestamp(), 'yyyy-MM-dd HH:mm:ss') : '—'}"></span>
+                        <span class="text-xs rounded px-2 py-0.5"
+                              th:classappend="${line.level() == 'ERROR' or line.level() == 'FATAL'} ? 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300' : (${line.level() == 'WARN' or line.level() == 'WARNING'} ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300' : (${line.level() == 'INFO'} ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300' : (${line.level() == 'DEBUG' or line.level() == 'TRACE'} ? 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300' : 'bg-slate-100 dark:bg-slate-700 text-slate-400 dark:text-slate-500')))"
+                              th:text="${line.level() != null ? line.level() : '—'}"></span>
+                        <span class="text-xs rounded px-2 py-0.5 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300"
+                              th:text="${line.nodeLabel()}"></span>
+                        <span th:if="${line.fileLabel() != null}"
+                              class="text-xs rounded px-2 py-0.5 bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400"
+                              th:text="${line.fileLabel()}"></span>
+                    </div>
+                    <div th:with="lineCount=${line.raw().split('\n').length}">
+                        <div class="font-mono whitespace-pre-wrap break-all line-clamp-1"
+                             :class="{ 'line-clamp-1': !expanded }" th:text="${line.raw()}"></div>
+                        <button th:if="${lineCount > 1 or #strings.length(line.raw()) > 150}" type="button"
+                                @click="expanded = !expanded"
+                                class="mt-1 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:underline transition-colors duration-150">
+                            <span x-show="!expanded" th:text="'Show full entry (' + ${lineCount} + ' lines)'"></span>
+                            <span x-show="expanded" x-cloak>Show less</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
 
             <div th:if="${!result.lines().isEmpty()}" class="flex justify-between items-center mt-3 text-sm">
                 <button th:if="${hasPrev}" type="button"
                         hx-get="/search" hx-include="#search-form" hx-target="#results"
                         th:attr="hx-vals=|js:{page: ${page - 1}}|"
-                        class="px-3 py-1 border border-slate-300 rounded hover:bg-slate-50">&larr; Prev</button>
-                <span th:unless="${hasPrev}" class="px-3 py-1 text-slate-300">&larr; Prev</span>
+                        class="px-3 py-1 border border-slate-300 dark:border-slate-600 rounded hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors duration-150">&larr; Prev</button>
+                <span th:unless="${hasPrev}" class="px-3 py-1 text-slate-300 dark:text-slate-600">&larr; Prev</span>
 
-                <span class="text-slate-400" th:text="'Page ' + (${page} + 1)">Page 1</span>
+                <span class="text-slate-400 dark:text-slate-500" th:text="'Page ' + (${page} + 1)">Page 1</span>
 
                 <button th:if="${hasNext}" type="button"
                         hx-get="/search" hx-include="#search-form" hx-target="#results"
                         th:attr="hx-vals=|js:{page: ${page + 1}}|"
-                        class="px-3 py-1 border border-slate-300 rounded hover:bg-slate-50">Next &rarr;</button>
-                <span th:unless="${hasNext}" class="px-3 py-1 text-slate-300">Next &rarr;</span>
+                        class="px-3 py-1 border border-slate-300 dark:border-slate-600 rounded hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors duration-150">Next &rarr;</button>
+                <span th:unless="${hasNext}" class="px-3 py-1 text-slate-300 dark:text-slate-600">Next &rarr;</span>
             </div>
         </div>
     </div>
+
+    <script>
+        function downloadResults() {
+            var form = document.getElementById('search-form');
+            var params = new URLSearchParams(new FormData(form));
+            window.location.href = '/api/search/export?' + params.toString();
+        }
+    </script>
 </body>
 </html>
