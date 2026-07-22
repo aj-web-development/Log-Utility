@@ -83,6 +83,16 @@ class SearchApiControllerTest {
     }
 
     @Test
+    void malformedIdReturns404() throws Exception {
+        // No controller method matches a non-UUID-shaped id (see the {id} UUID constraint in
+        // SearchApiController). MockMvc doesn't perform the servlet-container /error forward a
+        // real deployed Tomcat does, so ApiErrorAttributes never runs here to shape a body -
+        // verified separately, live, that the real response carries the ApiError shape.
+        mvc.perform(get("/api/search/projects/not-a-uuid"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
     void searchWithoutProjectIdReturns400() throws Exception {
         mvc.perform(post("/api/search")
                         .contentType(MediaType.APPLICATION_JSON)

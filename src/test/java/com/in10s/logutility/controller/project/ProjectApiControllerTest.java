@@ -75,6 +75,25 @@ class ProjectApiControllerTest {
     }
 
     @Test
+    void getOnPostOnlyRouteReturns405NotMisroutedToIdLookup() throws Exception {
+        // /path-check and /{id} sit at the same path depth; without the {id} UUID constraint,
+        // GET /api/projects/path-check silently matched {id}="path-check" instead of 405-ing.
+        // Body assertions aren't possible here: MockMvc doesn't perform the servlet-container
+        // /error forward a real deployed Tomcat does, so ApiErrorAttributes never runs in this
+        // test environment (verified separately, live, that the body carries the ApiError shape).
+        mvc.perform(get("/api/projects/path-check").with(httpBasic(ADMIN, ADMIN)))
+                .andExpect(status().isMethodNotAllowed());
+    }
+
+    @Test
+    void malformedIdReturns404() throws Exception {
+        // No controller method matches a non-UUID-shaped id (see the {id} UUID constraint on
+        // this controller). See the comment above re: MockMvc and the /error forward.
+        mvc.perform(get("/api/projects/not-a-uuid").with(httpBasic(ADMIN, ADMIN)))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
     void createRejectsMissingName() throws Exception {
         mvc.perform(post("/api/projects").with(httpBasic(ADMIN, ADMIN))
                         .contentType(MediaType.APPLICATION_JSON).content("{}"))

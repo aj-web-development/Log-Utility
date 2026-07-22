@@ -61,6 +61,15 @@ import java.util.UUID;
 @Tag(name = "Projects", description = "Admin (HTTP Basic): configure projects, nodes, and filter fields")
 public class ProjectApiController {
 
+    /**
+     * Constrains {@code {id}} to a UUID's shape so it can never structurally collide with a
+     * literal single-segment action route registered at this same path depth (e.g.
+     * {@code /path-check}) — without this, {@code GET /api/projects/path-check} would silently
+     * match here with {@code id="path-check"} instead of 405-ing on the real POST-only route.
+     */
+    private static final String UUID_PATTERN =
+            "{id:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}}";
+
     private final ProjectService projectService;
     private final LogbackXmlParser logbackXmlParser;
     private final SampleLineAnalyzer sampleLineAnalyzer;
@@ -71,7 +80,7 @@ public class ProjectApiController {
         return projectService.listProjects();
     }
 
-    @GetMapping("/{id}")
+    @GetMapping("/" + UUID_PATTERN)
     @Operation(summary = "Get a project's full configuration", description = "Nodes, filter fields, and line pattern - the edit-prefill equivalent.")
     public ProjectDetailResponse getProject(@PathVariable UUID id) {
         return toDetailResponse(projectService.loadForEdit(id));
@@ -86,7 +95,7 @@ public class ProjectApiController {
         return ResponseEntity.created(URI.create("/api/projects/" + id)).body(toDetailResponse(projectService.loadForEdit(id)));
     }
 
-    @PutMapping("/{id}")
+    @PutMapping("/" + UUID_PATTERN)
     @Operation(summary = "Replace a project's configuration", description = "Same shape as create; nodes/fields are replaced wholesale, not merged.")
     public ProjectDetailResponse updateProject(@PathVariable UUID id, @RequestBody ProjectRequest request) {
         ProjectWizardForm form = toForm(request, id);
@@ -95,7 +104,7 @@ public class ProjectApiController {
         return toDetailResponse(projectService.loadForEdit(id));
     }
 
-    @DeleteMapping("/{id}")
+    @DeleteMapping("/" + UUID_PATTERN)
     @ResponseStatus(HttpStatus.NO_CONTENT)
     @Operation(summary = "Delete a project", description = "Idempotent - deleting an already-missing id still returns 204.")
     public void deleteProject(@PathVariable UUID id) {

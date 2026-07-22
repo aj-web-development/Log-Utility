@@ -33,6 +33,10 @@ import java.util.UUID;
 @SecurityRequirements
 public class SearchApiController {
 
+    /** See {@code ProjectApiController.UUID_PATTERN} — same reasoning, kept in sync manually. */
+    private static final String UUID_PATTERN =
+            "{id:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}}";
+
     private final ProjectService projectService;
     private final SearchService searchService;
 
@@ -42,7 +46,7 @@ public class SearchApiController {
         return projectService.listProjects();
     }
 
-    @GetMapping("/projects/{id}")
+    @GetMapping("/projects/" + UUID_PATTERN)
     @Operation(summary = "Get a project's public detail", description = "Name and searchable filter fields for building a search form.")
     public PublicProjectView getProject(@PathVariable UUID id) {
         return projectService.findPublicView(id).orElseThrow(() -> new ProjectNotFoundException(id));
