@@ -1,6 +1,7 @@
 package com.in10s.logutility.service.parser;
 
 import com.in10s.logutility.response.parser.SampleLineAnalysis;
+
 /**
  * Guesses the timestamp/level/logger token positions in a pasted sample log line, for the
  * wizard's confirm-or-correct step. Never throws — any input, including blank text, yields an

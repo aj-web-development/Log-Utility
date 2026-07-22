@@ -1,6 +1,7 @@
 package com.in10s.logutility.entity.project;
 
 import com.in10s.logutility.service.search.FieldMatcher;
+
 /**
  * How a {@link FilterField}'s value is matched against a log line. The chosen constant
  * selects the corresponding {@code FieldMatcher} strategy in the search engine (Phase 6),

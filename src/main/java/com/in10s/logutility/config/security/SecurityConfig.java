@@ -4,8 +4,10 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
+import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.core.userdetails.User;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
@@ -16,10 +18,19 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.util.StringUtils;
 
 /**
- * Application security. Configuration ({@code /admin}, {@code /config}, project write APIs and
- * the wizard/upload endpoints) requires the single admin login; searching ({@code /},
- * {@code /search}, {@code /api/search}) is public. Sessions are persisted via Spring Session
- * JDBC (auto-configured) so a logged-in admin stays logged in across app instances.
+ * Application security, split across two filter chains:
+ * <ul>
+ *   <li>{@link #apiSecurityFilterChain} — the JSON REST API ({@code /api/**}). Search endpoints
+ *       are public; project-config endpoints require the single admin account, sent as HTTP
+ *       Basic on every request (stateless — no session, no CSRF, so any client — browser UI,
+ *       curl, another backend — can call it just by sending an {@code Authorization} header).</li>
+ *   <li>{@link #appSecurityFilterChain} — the server-rendered Thymeleaf/HTMX UI. Unchanged:
+ *       {@code /admin}, {@code /config}, and the wizard/upload endpoints require the admin's
+ *       session-based form login; searching ({@code /}, {@code /search}) is public. Sessions are
+ *       persisted via Spring Session JDBC (auto-configured) so a logged-in admin stays logged in
+ *       across app instances.</li>
+ * </ul>
+ * Both chains share the one admin account below.
  */
 @Configuration
 @EnableWebSecurity
@@ -50,18 +61,41 @@ public class SecurityConfig {
         return new InMemoryUserDetailsManager(adminUser);
     }
 
+    /**
+     * The REST API. Scoped to {@code /api/**} via {@link HttpSecurity#securityMatcher}, so it
+     * never sees requests the UI chain below handles, and vice versa. Stateless: no session is
+     * created and CSRF is disabled, since HTTP Basic requires an explicit {@code Authorization}
+     * header on every request rather than a cookie the browser attaches automatically — the
+     * cross-site request forgery CSRF protection guards against doesn't apply here.
+     */
     @Bean
     @Order(2)
+    public SecurityFilterChain apiSecurityFilterChain(HttpSecurity http) throws Exception {
+        http
+                .securityMatcher("/api/**")
+                .authorizeHttpRequests(auth -> auth
+                        .requestMatchers("/api/search/**").permitAll()
+                        .anyRequest().authenticated())
+                .httpBasic(Customizer.withDefaults())
+                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .csrf(csrf -> csrf.disable())
+                .cors(Customizer.withDefaults());
+        return http.build();
+    }
+
+    @Bean
+    @Order(3)
     public SecurityFilterChain appSecurityFilterChain(HttpSecurity http) throws Exception {
         http
                 .authorizeHttpRequests(auth -> auth
-                        // Public: search UI + read APIs + login + static assets + health.
-                        .requestMatchers("/", "/search/**", "/api/search/**").permitAll()
+                        // Public: search UI + login + static assets + health + API docs.
+                        .requestMatchers("/", "/search/**").permitAll()
                         .requestMatchers("/login", "/error").permitAll()
                         .requestMatchers("/css/**", "/js/**", "/webjars/**", "/favicon.ico").permitAll()
                         .requestMatchers("/actuator/health", "/actuator/info").permitAll()
-                        // Everything else — admin console, project write APIs, wizard/upload — is protected.
-                        .requestMatchers("/admin/**", "/config/**", "/api/projects/**").authenticated()
+                        .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
+                        // Everything else — admin console, wizard/upload — is protected.
+                        .requestMatchers("/admin/**", "/config/**").authenticated()
                         .anyRequest().authenticated())
                 .formLogin(form -> form
                         .loginPage("/login")

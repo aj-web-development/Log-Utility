@@ -1,6 +1,7 @@
 package com.in10s.logutility.service.validation;
 
 import com.in10s.logutility.response.validation.PathCheckResult;
+
 /**
  * Checks whether a configured filesystem path (a live log file or a backup directory) is
  * currently reachable, without ever throwing — callers always get a {@link PathCheckResult}

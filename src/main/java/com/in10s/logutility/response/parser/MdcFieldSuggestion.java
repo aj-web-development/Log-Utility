@@ -1,6 +1,7 @@
 package com.in10s.logutility.response.parser;
 
 import com.in10s.logutility.entity.project.FilterField;
+
 /**
  * One MDC key found in an uploaded logback pattern, pre-shaped into a suggested
  * {@code FilterField}. {@code linePrefix} is populated only when the pattern shows the key

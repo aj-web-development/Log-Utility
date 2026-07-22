@@ -2,6 +2,7 @@ package com.in10s.logutility.service.parser;
 
 import com.in10s.logutility.exception.parser.LogbackParseException;
 import com.in10s.logutility.response.parser.LogbackParseResult;
+
 /**
  * Extracts searchable-field and backup-pattern suggestions from a {@code logback-spring.xml}
  * (or plain {@code logback.xml}) file, so the project wizard can be pre-populated instead of
