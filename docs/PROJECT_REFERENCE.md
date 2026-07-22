@@ -27,8 +27,8 @@ Built in 9 phases per the original spec, all complete as of 2026-07-22. See
 - **Java 21** (floor, not a ceiling — code may use virtual threads and other 21-only APIs freely)
 - **Spring Boot 4.1.0** → Spring Framework 7, Jakarta EE 11, Spring Security 7, Spring Session
   4.1.0, Hibernate ORM 7. This is *not* the Boot 3.x line most tutorials/training data assume.
-- **Maven** (`./mvnw` wrapper). GroupId `com.in10s`, artifactId `logutility`, base package
-  `com.in10s.logutility`.
+- **Maven** (`./mvnw` wrapper). GroupId `com.app`, artifactId `logutility`, base package
+  `com.app.logutility`.
 - **PostgreSQL** (prod) / **H2** (dev, `MODE=PostgreSQL`), via **Flyway**.
 - **Thymeleaf + HTMX 2.0.3 + Alpine.js 3.x + Tailwind** — all via CDN `<script>` tags in
   [fragments/head.html](../src/main/resources/templates/fragments/head.html), zero Node/frontend
@@ -87,7 +87,7 @@ re-run this kind of check, not just the existing tests.
 ## 4. Package map
 
 ```
-com.in10s.logutility
+com.app.logutility
 ├─ LogutilityApplication      extends SpringBootServletInitializer (WAR-deployable + runnable jar)
 ├─ project/                   JPA entities + repositories (the domain model)
 ├─ project/config/            Project CRUD service + the admin setup wizard + its controllers
@@ -147,14 +147,14 @@ date/time column — a SQL Server target needs `db/migration/sqlserver/` using `
 
 One admin account, no user database. Credentials come from `LOGUTY_ADMIN_USERNAME`/
 `LOGUTY_ADMIN_PASSWORD` env vars (bound via `loguty.admin.*` in
-[AdminProperties](../src/main/java/com/in10s/logutility/security/AdminProperties.java)), BCrypt-hashed
+[AdminProperties](../src/main/java/com/app/logutility/security/AdminProperties.java)), BCrypt-hashed
 into an in-memory `UserDetailsService` at startup — **the raw password is never persisted**.
-[SecurityConfig](../src/main/java/com/in10s/logutility/security/SecurityConfig.java) fails fast
+[SecurityConfig](../src/main/java/com/app/logutility/security/SecurityConfig.java) fails fast
 (`IllegalStateException`) if either is blank.
 
 Access rules: `permitAll` on `/`, `/search/**`, `/api/search/**`, `/login`, static assets, health;
 `authenticated` on `/admin/**`, `/config/**`, `/api/projects/**`. A separate
-[DevH2ConsoleSecurityConfig](../src/main/java/com/in10s/logutility/security/DevH2ConsoleSecurityConfig.java)
+[DevH2ConsoleSecurityConfig](../src/main/java/com/app/logutility/security/DevH2ConsoleSecurityConfig.java)
 (`@Profile("dev")`, `@Order(1)`) permits `/h2-console/**` and relaxes CSRF/frame-options for it
 only — never active in prod.
 
@@ -163,9 +163,9 @@ instances sharing one database. **See §9 for the mutation gotcha this creates.*
 
 ## 8. The wizard system
 
-[ProjectWizardController](../src/main/java/com/in10s/logutility/project/config/ProjectWizardController.java)
+[ProjectWizardController](../src/main/java/com/app/logutility/project/config/ProjectWizardController.java)
 drives a 5-step HTMX wizard, session-backed. Steps, in order (see
-[WizardStep](../src/main/java/com/in10s/logutility/project/config/WizardStep.java)):
+[WizardStep](../src/main/java/com/app/logutility/project/config/WizardStep.java)):
 
 ```
 DETAILS → NODES → SAMPLE_LINE → FIELDS → REVIEW
@@ -247,26 +247,26 @@ sample-line analyzer → docs). Deliberately out of scope / not implemented:
 
 One `SearchService.search(SearchRequest) -> SearchResult` call runs this pipeline:
 
-1. **[ProjectSearchLoader](../src/main/java/com/in10s/logutility/search/ProjectSearchLoader.java)**
+1. **[ProjectSearchLoader](../src/main/java/com/app/logutility/search/ProjectSearchLoader.java)**
    — a separate `@Transactional(readOnly=true)` bean (not a self-invocation, so the proxy applies)
    that loads the project's nodes/fields/line-pattern fully inside one transaction, before the
    async fan-out — nothing lazy is touched off-session.
-2. **[DatePruner](../src/main/java/com/in10s/logutility/search/DatePruner.java)** — pure,
+2. **[DatePruner](../src/main/java/com/app/logutility/search/DatePruner.java)** — pure,
    filesystem-free: expands `{date}` per calendar day (assumes `yyyy-MM-dd` folder format — a
    documented limitation, not configurable per-project), turns `{HH}`/`{i}` into `*` globs, and
    decides whether to also read the live file via an injectable `Clock` (testable).
-3. **[GlobFileResolver](../src/main/java/com/in10s/logutility/search/GlobFileResolver.java)**
+3. **[GlobFileResolver](../src/main/java/com/app/logutility/search/GlobFileResolver.java)**
    resolves each glob into concrete files by walking one path segment at a time via
    `Files.newDirectoryStream` — cross-platform, unlike a whole-path `glob:` `PathMatcher`.
-4. **[LogSourceReader](../src/main/java/com/in10s/logutility/search/LogSourceReader.java)**
+4. **[LogSourceReader](../src/main/java/com/app/logutility/search/LogSourceReader.java)**
    (plain/`.log` and gzip/`.log.gz` impls) streams lines lazily via `BufferedReader` — never
    buffers a whole file.
 5. **Per-line filtering** in
-   [SearchServiceImpl](../src/main/java/com/in10s/logutility/search/SearchServiceImpl.java):
-   [LogLineParser](../src/main/java/com/in10s/logutility/search/LogLineParser.java) parses only
+   [SearchServiceImpl](../src/main/java/com/app/logutility/search/SearchServiceImpl.java):
+   [LogLineParser](../src/main/java/com/app/logutility/search/LogLineParser.java) parses only
    the leading timestamp (via `parseUnresolved`, never throws) and rejects out-of-range lines
    *before* running the more expensive field/text matchers — the fast-reject.
-6. **[FieldMatcher](../src/main/java/com/in10s/logutility/search/FieldMatcher.java)** strategy —
+6. **[FieldMatcher](../src/main/java/com/app/logutility/search/FieldMatcher.java)** strategy —
    `ExactTokenMatcher`/`SubstringMatcher`/`RegexMatcher`, selected per `FilterField.matchType` via
    an injected `Map<MatchType, FieldMatcher>` (add a new match type = add a new `@Component`
    implementing the interface + a new `MatchType` enum value — nothing else changes).
@@ -274,7 +274,7 @@ One `SearchService.search(SearchRequest) -> SearchResult` call runs this pipelin
    bounded by `Semaphore(search.max-nodes-parallel)`. Each node re-checks reachability first
    (`PathAvailabilityChecker`) — unreachable nodes are added to `unreachableNodes` and skipped,
    never fail the whole search.
-8. **[ResultMerger](../src/main/java/com/in10s/logutility/search/ResultMerger.java)** —
+8. **[ResultMerger](../src/main/java/com/app/logutility/search/ResultMerger.java)** —
    timestamp-sorted merge (nulls last) of every node's matches.
 9. **Cap**: hard-stops at `search.max-results` (default 5000; configurable via
    `SEARCH_MAX_RESULTS`/`SEARCH_MAX_NODES_PARALLEL` env vars, standard Spring relaxed binding) and
@@ -294,7 +294,7 @@ formats when a project has no `LinePattern.timestampPattern` configured yet.
   public search page's project switcher) is a **shared cookie**,
   `ProjectAdminController.ACTIVE_PROJECT_COOKIE` (`LOGUTY_ACTIVE_PROJECT`) — not tied to the login
   session, since searching is public. Reused by
-  [SearchController](../src/main/java/com/in10s/logutility/web/SearchController.java) directly by
+  [SearchController](../src/main/java/com/app/logutility/web/SearchController.java) directly by
   referencing the same constant.
 - HTMX `hx-vals` with the `js:` prefix (e.g. `hx-vals="js:{page: ${page - 1}}"` via Thymeleaf's
   `|...|` literal substitution) is the established pattern for passing dynamic values that don't

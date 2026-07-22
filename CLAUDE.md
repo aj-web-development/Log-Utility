@@ -38,7 +38,7 @@ sample-line analyzer). A few (`*IntegrationTest`) boot the full app against the 
 
 ## Architecture
 
-Package layout under `com.in10s.logutility`:
+Package layout under `com.app.logutility`:
 
 | Package | Responsibility |
 |---|---|

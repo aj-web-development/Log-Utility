@@ -8,7 +8,7 @@
 		<version>4.1.0</version>
 		<relativePath/> <!-- lookup parent from repository -->
 	</parent>
-	<groupId>com.in10s</groupId>
+	<groupId>com.app</groupId>
 	<artifactId>logutility</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
 	<!-- Default packaging is an executable jar; the war17/war21 profiles switch this to war. -->
