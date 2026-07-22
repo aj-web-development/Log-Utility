@@ -66,6 +66,17 @@ class SearchControllerTest {
     }
 
     @Test
+    void selectingTheBlankPlaceholderOptionClearsTheCookieInsteadOfErroring() throws Exception {
+        // The project picker's placeholder option has value="", so switching back to it submits
+        // ?projectId= (present but empty) rather than omitting the param - previously this 400'd
+        // with "Required parameter 'projectId' is not present" instead of clearing the selection.
+        mvc.perform(get("/search/select-project").param("projectId", ""))
+                .andExpect(status().is3xxRedirection())
+                .andExpect(redirectedUrl("/"))
+                .andExpect(cookie().maxAge(ProjectAdminController.ACTIVE_PROJECT_COOKIE, 0));
+    }
+
+    @Test
     void homePageRendersDynamicFilterFieldsForActiveProject() throws Exception {
         UUID projectId = createProject("search-ui-fields", null);
 
@@ -100,7 +111,9 @@ class SearchControllerTest {
                 .andExpect(content().string(containsString("1 matches")))
                 // Regression check akin to the wizard's th:switch bug: the initial "enter your
                 // criteria" placeholder belongs to the full page, not the results fragment.
-                .andExpect(content().string(not(containsString("Enter your criteria"))));
+                .andExpect(content().string(not(containsString("Enter your criteria"))))
+                // 1 match at PAGE_SIZE=50 is exactly one page.
+                .andExpect(content().string(containsString("Page 1 of 1")));
     }
 
     @Test

@@ -16,13 +16,34 @@
     <script>
         // Runs synchronously, before Tailwind loads and before first paint, so there's no
         // flash of the wrong theme. Preference is client-only (localStorage) - no cookie/
-        // server round trip needed for something this purely cosmetic.
+        // server round trip needed for something this purely cosmetic. Light is always the
+        // default for a first-time visitor, regardless of OS preference - every skin should
+        // open in light mode until the admin explicitly opts into dark via the toggle.
         (function () {
-            var stored = localStorage.getItem('theme');
-            var dark = stored ? stored === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
-            document.documentElement.classList.toggle('dark', dark);
+            document.documentElement.classList.toggle('dark', localStorage.getItem('theme') === 'dark');
+        })();
+        // Same pre-paint pattern as the theme toggle above, for the results density preference.
+        (function () {
+            document.documentElement.classList.toggle('compact', localStorage.getItem('density') === 'compact');
+        })();
+        // Same pattern again for the visual skin (see the CSS below) - Console is the default
+        // look; stale values from a removed skin (e.g. a prior "ledger" choice) fall back to it.
+        (function () {
+            var skin = localStorage.getItem('skin');
+            if (['default', 'console', 'signal'].indexOf(skin) === -1) skin = 'console';
+            document.documentElement.setAttribute('data-skin', skin);
+        })();
+        // Console-only font choice (see .console-font-select below, hidden for every other
+        // skin). JetBrains Mono is the default look for Console; "system" falls back to the
+        // plain OS monospace stack every other skin already uses.
+        (function () {
+            var font = localStorage.getItem('consoleFont');
+            document.documentElement.setAttribute('data-console-font', font === 'system' ? 'system' : 'jetbrains');
         })();
     </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com"/>
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet"/>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         // Must run AFTER the CDN script has loaded: it initializes window.tailwind itself, so
@@ -38,7 +59,33 @@
             localStorage.setItem('theme', dark ? 'dark' : 'light');
         }
 
+        function toggleDensity() {
+            var compact = !document.documentElement.classList.contains('compact');
+            document.documentElement.classList.toggle('compact', compact);
+            localStorage.setItem('density', compact ? 'compact' : 'comfortable');
+        }
+
+        // Each skin defines its own light + dark token set (see the CSS below), so the theme
+        // toggle keeps working no matter which skin is active.
+        function setSkin(skin) {
+            localStorage.setItem('skin', skin);
+            document.documentElement.setAttribute('data-skin', skin);
+        }
+
+        function setConsoleFont(font) {
+            localStorage.setItem('consoleFont', font);
+            document.documentElement.setAttribute('data-console-font', font);
+        }
+
         document.addEventListener('DOMContentLoaded', function () {
+            // The <select> itself has no server-side knowledge of the client-only skin
+            // preference (see the pre-paint IIFE above), so sync its displayed value on load.
+            var skinSelect = document.getElementById('skin-select');
+            if (skinSelect) skinSelect.value = document.documentElement.getAttribute('data-skin') || 'console';
+
+            var fontSelect = document.getElementById('console-font-select');
+            if (fontSelect) fontSelect.value = document.documentElement.getAttribute('data-console-font') || 'jetbrains';
+
             var token = document.querySelector('meta[name="_csrf"]');
             var header = document.querySelector('meta[name="_csrf_header"]');
             if (token && header && token.content) {
@@ -58,6 +105,10 @@
                     el.classList.remove('fade-in-up');
                     el.removeEventListener('animationend', handler);
                 });
+                // Results-page-specific enrichment (highlighting, stats strip, filter chips, view
+                // mode, grouping) is wired directly on #results in search.html itself, since it's
+                // specific to that page's markup/model and needs to be reliable across every kind
+                // of swap that targets it (search submit, Prev/Next, page-jump).
             });
         });
     </script>
@@ -72,6 +123,7 @@
         .htmx-request.htmx-indicator, .htmx-request .htmx-indicator { opacity: 1; }
         /* Alpine's convention to prevent a flash of un-toggled content before it initializes. */
         [x-cloak] { display: none !important; }
+        .hidden { display: none !important; }
 
         /* Smooth crossfade when the theme toggles, instead of an abrupt color snap. */
         html { transition: background-color 300ms ease, color 300ms ease; }
@@ -85,6 +137,262 @@
             to { opacity: 1; transform: translateY(0); }
         }
         .fade-in-up { animation: fadeInUp 250ms ease-out; }
+
+        /* Compact/"terminal" density mode: flatter, tighter result rows for scanning many lines.
+           Toggled by toggleDensity() above; default (comfortable) look is untouched. Selectors
+           include #results deliberately (see the skin specificity note further down). */
+        html.compact #results .log-card {
+            padding: 0.375rem 0.5rem;
+            border-radius: 0;
+            box-shadow: none;
+            border-width: 0 0 1px 0;
+        }
+        /* .results-list replaces Tailwind's space-y-2 utility on the result list so this override
+           doesn't have to fight that utility's own (version-dependent) generated selector. */
+        .results-list > * + * { margin-top: 0.5rem; }
+        html.compact .results-list > * + * { margin-top: 0; }
+        html.compact #results .log-line-text { font-size: 0.75rem; }
+
+        /* densityToggle fragment's icon swap - same show/hide-by-ancestor-class idea as the
+           dark/light sun-moon icons above, but for .compact since that's not a Tailwind variant. */
+        .density-icon-compact { display: none; }
+        html.compact .density-icon-comfortable { display: none; }
+        html.compact .density-icon-compact { display: inline; }
+
+        /* ===================================================================================
+           Semantic color tokens, "Default" values (i.e. what you see with no skin selected).
+           These reproduce today's exact Tailwind red/amber/blue/slate shades so picking
+           "Default" from the skin switcher looks identical to how the page always looked.
+           Console/Signal redefine the same custom properties further down instead of
+           duplicating every rule that consumes them. */
+        :root {
+            --lvl-error-bg: #fee2e2; --lvl-error-fg: #b91c1c;
+            --lvl-warn-bg: #fef3c7;  --lvl-warn-fg: #b45309;
+            --lvl-info-bg: #dbeafe; --lvl-info-fg: #1d4ed8;
+            --lvl-debug-bg: #f1f5f9; --lvl-debug-fg: #475569;
+            --lvl-other-bg: #f1f5f9; --lvl-other-fg: #94a3b8;
+            --tag-bg: #f1f5f9; --tag-fg: #475569;
+            --mark-bg: #fde68a; --mark-fg: inherit;
+            --banner-error-bg: #fef2f2; --banner-error-fg: #b91c1c; --banner-error-border: #fecaca;
+            --banner-warning-bg: #fffbeb; --banner-warning-fg: #92400e; --banner-warning-border: #fde68a;
+            --banner-info-bg: #eff6ff; --banner-info-fg: #1d4ed8; --banner-info-border: #bfdbfe;
+        }
+        html.dark {
+            --lvl-error-bg: rgba(127,29,29,0.4); --lvl-error-fg: #fca5a5;
+            --lvl-warn-bg: rgba(120,53,15,0.4);  --lvl-warn-fg: #fcd34d;
+            --lvl-info-bg: rgba(30,58,138,0.4);  --lvl-info-fg: #93c5fd;
+            --lvl-debug-bg: #334155; --lvl-debug-fg: #cbd5e1;
+            --lvl-other-bg: #334155; --lvl-other-fg: #64748b;
+            --tag-bg: #334155; --tag-fg: #cbd5e1;
+            --mark-bg: rgba(217,119,6,0.5); --mark-fg: inherit;
+            --banner-error-bg: rgba(127,29,29,0.3); --banner-error-fg: #fca5a5; --banner-error-border: #7f1d1d;
+            --banner-warning-bg: rgba(120,53,15,0.3); --banner-warning-fg: #fcd34d; --banner-warning-border: #78350f;
+            --banner-info-bg: rgba(30,58,138,0.3); --banner-info-fg: #93c5fd; --banner-info-border: #1e3a8a;
+        }
+
+        /* ===================================================================================
+           Shared component rules - written once, colored entirely via the tokens above, so
+           every skin gets these for free by only redefining the tokens (plus whatever
+           structural look it wants on top, in its own block below). */
+        mark { background-color: var(--mark-bg); color: var(--mark-fg); border-radius: 2px; padding: 0 1px; }
+
+        .log-level.level-error, .stat-pill.level-error { background: var(--lvl-error-bg); color: var(--lvl-error-fg); }
+        .log-level.level-warn,  .stat-pill.level-warn  { background: var(--lvl-warn-bg);  color: var(--lvl-warn-fg); }
+        .log-level.level-info,  .stat-pill.level-info  { background: var(--lvl-info-bg);  color: var(--lvl-info-fg); }
+        .log-level.level-debug, .stat-pill.level-debug { background: var(--lvl-debug-bg); color: var(--lvl-debug-fg); }
+        .log-level.level-other, .stat-pill.level-other { background: var(--lvl-other-bg); color: var(--lvl-other-fg); }
+        .log-node, .log-file, .stat-pill[data-filter-type="node"], .stat-pill[data-filter-type="file"] {
+            background: var(--tag-bg); color: var(--tag-fg);
+        }
+
+        .stat-label { font-size: 0.75rem; color: var(--tag-fg); align-self: center; }
+        .stat-pill {
+            font: inherit; font-size: 0.75rem; border-radius: 0.25rem; padding: 0.125rem 0.5rem;
+            border: 1px solid transparent; cursor: pointer;
+        }
+        .stat-pill.active { border-color: currentColor; }
+        .stat-pill:hover { filter: brightness(0.95); }
+        html.dark .stat-pill:hover { filter: brightness(1.2); }
+
+        .chip {
+            display: inline-flex; align-items: center; gap: 0.25rem; font-size: 0.75rem;
+            border-radius: 9999px; padding: 0.125rem 0.25rem 0.125rem 0.5rem;
+            background: var(--tag-bg); color: var(--tag-fg);
+        }
+        .chip-close {
+            font: inherit; border: none; background: transparent; color: inherit; cursor: pointer;
+            border-radius: 9999px; width: 1rem; height: 1rem; line-height: 1;
+        }
+        .chip-close:hover { background: rgba(0,0,0,0.08); }
+        html.dark .chip-close:hover { background: rgba(255,255,255,0.12); }
+
+        .banner-error { background: var(--banner-error-bg); color: var(--banner-error-fg); border-color: var(--banner-error-border); }
+        .banner-warning { background: var(--banner-warning-bg); color: var(--banner-warning-fg); border-color: var(--banner-warning-border); }
+        .banner-info { background: var(--banner-info-bg); color: var(--banner-info-fg); border-color: var(--banner-info-border); }
+
+        /* View-mode segmented control + group-by select - shape only, Default's colors come from
+           ordinary Tailwind border/bg classes already on the buttons in the markup. */
+        .view-mode-btn.active { background: var(--tag-bg); color: var(--tag-fg); font-weight: 600; }
+
+        /* Terminal-stream row layout (built client-side, see buildStreamRow() in search.html). */
+        #stream-view { display: flex; flex-direction: column; }
+        .log-row { display: flex; align-items: baseline; gap: 0.6rem; padding: 0.2rem 0.4rem; font-size: 0.8rem; }
+        .log-row .log-timestamp { font-family: ui-monospace, Consolas, monospace; font-size: 0.72rem; color: var(--tag-fg); white-space: nowrap; }
+        .log-row .log-node { background: none; padding: 0; font-size: 0.72rem; }
+        .log-row .log-line-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, Consolas, monospace; }
+        .log-row-expand {
+            font: inherit; font-size: 0.72rem; border: none; background: none; cursor: pointer;
+            color: var(--tag-fg); flex-shrink: 0;
+        }
+        .log-row-extra {
+            font-family: ui-monospace, Consolas, monospace; font-size: 0.74rem; color: var(--tag-fg);
+            white-space: pre-wrap; padding: 0.2rem 0.4rem 0.4rem 2.6rem;
+        }
+
+        /* Group-by sections - built client-side, see applyGrouping() in search.html. */
+        .log-group { margin-bottom: 0.75rem; }
+        .log-group-head { display: flex; align-items: baseline; gap: 0.5rem; font-size: 0.78rem; padding: 0.2rem 0.4rem; color: var(--tag-fg); }
+        .log-group-key { font-family: ui-monospace, Consolas, monospace; font-weight: 600; color: inherit; }
+        .log-group-count { font-size: 0.72rem; }
+        .log-group-body { margin-left: 0.5rem; padding-left: 0.75rem; border-left: 2px solid var(--tag-bg); display: flex; flex-direction: column; gap: 0.3rem; }
+        .log-group-body > .log-card { margin: 0; }
+
+        /* ===================================================================================
+           Console skin - technical/utility identity, and the default skin (see the pre-paint
+           IIFE and skinSelect below). Unlike the original design, it responds to the light/dark
+           toggle just like Default did - Console is the aesthetic, not a fixed palette - so it
+           defines both a light (default) and dark (html.dark) token set instead of one fixed one. */
+        html[data-skin="console"] {
+            --lvl-error-fg: #b3392a; --lvl-warn-fg: #93701d; --lvl-info-fg: #2c5878; --lvl-debug-fg: #6b7280; --lvl-other-fg: #9aa1a8;
+            --lvl-error-bg: transparent; --lvl-warn-bg: transparent; --lvl-info-bg: transparent; --lvl-debug-bg: transparent; --lvl-other-bg: transparent;
+            --tag-bg: transparent; --tag-fg: #6b7280;
+            --mark-bg: #dbe6c8; --mark-fg: #1b2a10;
+            --banner-error-bg: #fbe9e6; --banner-error-fg: #b3392a; --banner-error-border: #e3d9d4;
+            --banner-warning-bg: #faf1de; --banner-warning-fg: #93701d; --banner-warning-border: #e3d9c4;
+            --banner-info-bg: #e7eff5; --banner-info-fg: #2c5878; --banner-info-border: #d6e2ea;
+            --console-page-bg: #f4f6f7; --console-page-fg: #1b232b; --console-panel-bg: #eef1f2;
+            --console-line: #d7dde0; --console-accent: #2f8f80; --console-accent-fg: #f4faf9;
+            --console-mono-stack: 'JetBrains Mono', ui-monospace, "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+        }
+        html[data-skin="console"][data-console-font="system"] {
+            --console-mono-stack: ui-monospace, "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+        }
+        html[data-skin="console"].dark {
+            --lvl-error-fg: #e5534b; --lvl-warn-fg: #d8a657; --lvl-info-fg: #5b9bd5; --lvl-debug-fg: #6d7a8a; --lvl-other-fg: #45505e;
+            --tag-fg: #6d7a8a;
+            --mark-bg: #3a4a2e; --mark-fg: #d9f2b0;
+            --banner-error-bg: rgba(229,83,75,0.12); --banner-error-fg: #e5534b; --banner-error-border: #232c38;
+            --banner-warning-bg: rgba(216,166,87,0.12); --banner-warning-fg: #d8a657; --banner-warning-border: #232c38;
+            --banner-info-bg: rgba(91,155,213,0.12); --banner-info-fg: #5b9bd5; --banner-info-border: #232c38;
+            --console-page-bg: #10151c; --console-page-fg: #c9d1d9; --console-panel-bg: #161d26;
+            --console-line: #232c38; --console-accent: #4fb6a8; --console-accent-fg: #08211d;
+        }
+        html[data-skin="console"] body {
+            background: var(--console-page-bg) !important; color: var(--console-page-fg) !important;
+            font-family: var(--console-mono-stack);
+        }
+        html[data-skin="console"] header { background: var(--console-panel-bg) !important; border-bottom: 1px solid var(--console-line); }
+        html[data-skin="console"] .project-picker,
+        html[data-skin="console"] #search-form {
+            background: var(--console-panel-bg) !important; box-shadow: none; border: 1px solid var(--console-line); border-radius: 0;
+        }
+        html[data-skin="console"] input, html[data-skin="console"] select {
+            font-family: inherit; background: var(--console-page-bg); color: inherit; border: 1px solid var(--console-line); border-radius: 0;
+        }
+        html[data-skin="console"] input:focus, html[data-skin="console"] select:focus { outline: none; border-color: var(--console-accent); }
+        html[data-skin="console"] button[type="submit"] { background: var(--console-accent); color: var(--console-accent-fg); border-radius: 0; font-weight: 600; }
+        html[data-skin="console"] #results .log-card, html[data-skin="console"] .log-row-wrap {
+            background: transparent !important; box-shadow: none; border-radius: 0; border-bottom: 1px solid var(--console-line);
+        }
+        html[data-skin="console"] .log-level, html[data-skin="console"] .log-node, html[data-skin="console"] .log-file {
+            background: transparent; padding: 0; font-weight: 700;
+        }
+        html[data-skin="console"] .empty-state, html[data-skin="console"] .skeleton-card {
+            background: var(--console-panel-bg) !important; box-shadow: none; border: 1px solid var(--console-line); border-radius: 0;
+        }
+        html[data-skin="console"] .stat-pill, html[data-skin="console"] .chip { border-radius: 0; }
+        /* Stream/group components are shared markup across every skin (see the un-scoped rules
+           above), so Console's font choice needs its own override here rather than changing the
+           shared rule's font-family directly - other skins must keep the plain OS mono stack. */
+        html[data-skin="console"] .log-row .log-timestamp,
+        html[data-skin="console"] .log-row .log-line-text,
+        html[data-skin="console"] .log-row-extra,
+        html[data-skin="console"] .log-group-key { font-family: var(--console-mono-stack); }
+
+        /* ===================================================================================
+           Signal Room skin - dashboard/control-room identity, light + dark token sets. */
+        html[data-skin="signal"] {
+            --lvl-error-fg: #c0392b; --lvl-warn-fg: #b9770e; --lvl-info-fg: #2f5fa8; --lvl-debug-fg: #6b7280; --lvl-other-fg: #9aa1a8;
+            --lvl-error-bg: transparent; --lvl-warn-bg: transparent; --lvl-info-bg: transparent; --lvl-debug-bg: transparent; --lvl-other-bg: transparent;
+            --tag-bg: #eef1f6; --tag-fg: #5b6b84;
+            --mark-bg: #f5deae; --mark-fg: #241705;
+            --banner-error-bg: #fbe9e6; --banner-error-fg: #c0392b; --banner-error-border: #e3d9d4;
+            --banner-warning-bg: #faf1de; --banner-warning-fg: #b9770e; --banner-warning-border: #e3d9c4;
+            --banner-info-bg: #e7eff5; --banner-info-fg: #2f5fa8; --banner-info-border: #d6e2ea;
+            --signal-page-bg: #eef1f6; --signal-page-fg: #1b2436; --signal-panel-bg: #ffffff;
+            --signal-line: #d7dfe8; --signal-accent: #b9770e; --signal-accent-fg: #241705; --signal-debug: #9aa1a8;
+        }
+        html[data-skin="signal"].dark {
+            --lvl-error-fg: #e2574c; --lvl-warn-fg: #f0a93b; --lvl-info-fg: #4c8dff; --lvl-debug-fg: #5b6b84; --lvl-other-fg: #45526a;
+            --tag-bg: #101a2c; --tag-fg: #5b6b84;
+            --mark-bg: rgba(240,169,59,0.28); --mark-fg: #ffe9c2;
+            --banner-error-bg: rgba(226,87,76,0.12); --banner-error-fg: #e2574c; --banner-error-border: #1e2c42;
+            --banner-warning-bg: rgba(240,169,59,0.12); --banner-warning-fg: #f0a93b; --banner-warning-border: #1e2c42;
+            --banner-info-bg: rgba(76,141,255,0.12); --banner-info-fg: #4c8dff; --banner-info-border: #1e2c42;
+            --signal-page-bg: #0b1220; --signal-page-fg: #d7deE8; --signal-panel-bg: #101a2c;
+            --signal-line: #1e2c42; --signal-accent: #f0a93b; --signal-accent-fg: #241705; --signal-debug: #45526a;
+        }
+        html[data-skin="signal"] body {
+            background: var(--signal-page-bg) !important; color: var(--signal-page-fg) !important;
+            font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+        }
+        html[data-skin="signal"] header { background: var(--signal-page-bg) !important; border-bottom: 1px solid var(--signal-line); }
+        html[data-skin="signal"] .project-picker,
+        html[data-skin="signal"] #search-form {
+            background: var(--signal-panel-bg) !important; box-shadow: none; border: 1px solid var(--signal-line); border-radius: 6px;
+        }
+        html[data-skin="signal"] input, html[data-skin="signal"] select {
+            font-family: inherit; background: var(--signal-page-bg); color: inherit; border: 1px solid var(--signal-line); border-radius: 4px;
+        }
+        html[data-skin="signal"] input:focus, html[data-skin="signal"] select:focus { outline: none; border-color: var(--signal-accent); box-shadow: 0 0 0 3px rgba(185,119,14,0.18); }
+        html[data-skin="signal"] button[type="submit"] { background: var(--signal-accent); color: var(--signal-accent-fg); border-radius: 4px; font-weight: 600; }
+        html[data-skin="signal"] #results .log-card, html[data-skin="signal"] .log-row-wrap {
+            background: var(--signal-panel-bg) !important; border: 1px solid var(--signal-line); border-radius: 5px; border-left: 3px solid var(--signal-debug);
+        }
+        html[data-skin="signal"] #results .log-card:has(.level-error), html[data-skin="signal"] .log-row-wrap:has(.level-error) { border-left-color: var(--lvl-error-fg); }
+        html[data-skin="signal"] #results .log-card:has(.level-warn),  html[data-skin="signal"] .log-row-wrap:has(.level-warn)  { border-left-color: var(--lvl-warn-fg); }
+        html[data-skin="signal"] #results .log-card:has(.level-info),  html[data-skin="signal"] .log-row-wrap:has(.level-info)  { border-left-color: var(--lvl-info-fg); }
+        html[data-skin="signal"] .empty-state, html[data-skin="signal"] .skeleton-card {
+            background: var(--signal-panel-bg) !important; border: 1px solid var(--signal-line); box-shadow: none;
+        }
+        /* #stats-strip becomes a tile grid instead of a flex-wrap pill row; .stat-label (the
+           "This page:" caption) is redundant next to self-explanatory tiles, so it's hidden. */
+        html[data-skin="signal"] #stats-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(88px, 1fr)); gap: 1px; background: var(--signal-line); border: 1px solid var(--signal-line); }
+        html[data-skin="signal"] #stats-strip .stat-label { display: none; }
+        html[data-skin="signal"] #stats-strip .stat-pill {
+            background: var(--signal-panel-bg); border-radius: 0; padding: 0.5rem 0.7rem; font-variant-numeric: tabular-nums; font-size: 0.85rem;
+        }
+        html[data-skin="signal"] #stats-strip .stat-pill.active { box-shadow: inset 0 -2px 0 currentColor; }
+
+        /* Show-more entries can otherwise stretch edge-to-edge in a wide layout - cap the line
+           length in cards view for readability (stream view already ellipsis-truncates). */
+        .log-card .log-line-text { max-width: 90ch; }
+
+        /* A big stack trace expanding without bound pushes every entry below it far down the
+           list, making the "Show less" button hard to get back to - cap the expanded height and
+           scroll inside the entry instead, so collapsing it is always one scroll-step away. */
+        .log-entry-expanded { max-height: 320px; overflow-y: auto; }
+        .log-row-extra { max-height: 260px; overflow-y: auto; }
+
+        /* Collapsible search panel (project picker + search form) - see toggleSearchPanel() in
+           search.html. Squeezes the "not used much once results are showing" chrome. */
+        #panel-toggle-btn { white-space: nowrap; }
+
+        /* Console-only font switcher (see consoleFontSelect fragment + setConsoleFont() above) -
+           hidden by default, shown purely via this attribute selector so it appears/disappears
+           automatically whenever data-skin changes, without any extra JS wiring. */
+        .console-font-select { display: none; }
+        html[data-skin="console"] .console-font-select { display: inline-block; }
     </style>
 </head>
 <body>
@@ -92,7 +400,7 @@
      needed for the icon itself, only for flipping the class (see toggleTheme() above). -->
 <button th:fragment="themeToggle" type="button" onclick="toggleTheme()"
         title="Toggle dark / light theme"
-        class="rounded p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-800 transition-colors duration-150
+        class="theme-toggle rounded p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-800 transition-colors duration-150
                dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-slate-100">
     <svg class="w-5 h-5 dark:hidden" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
         <path d="M12 3a1 1 0 0 1 1 1v1a1 1 0 1 1-2 0V4a1 1 0 0 1 1-1zm0 5a4 4 0 1 1 0 8 4 4 0 0 1 0-8zm9 4a1 1 0 0 1-1 1h-1a1 1 0 1 1 0-2h1a1 1 0 0 1 1 1zM4 13a1 1 0 0 1 0-2h1a1 1 0 1 1 0 2H4zm14.657-6.657a1 1 0 0 1 0 1.414l-.707.707a1 1 0 1 1-1.414-1.414l.707-.707a1 1 0 0 1 1.414 0zM6.343 17.657a1 1 0 0 1 0 1.414l-.707.707a1 1 0 1 1-1.414-1.414l.707-.707a1 1 0 0 1 1.414 0zM12 19a1 1 0 0 1 1 1v1a1 1 0 1 1-2 0v-1a1 1 0 0 1 1-1zm6.657 1.657a1 1 0 0 1-1.414 0l-.707-.707a1 1 0 1 1 1.414-1.414l.707.707a1 1 0 0 1 0 1.414zM5.636 6.343a1 1 0 0 1-1.414 0l-.707-.707A1 1 0 1 1 4.93 4.222l.707.707a1 1 0 0 1 0 1.414z"/>
@@ -101,5 +409,31 @@
         <path d="M21.64 13a1 1 0 0 0-1.05-.14 8.05 8.05 0 0 1-3.37.73 8.15 8.15 0 0 1-8.14-8.1 8.59 8.59 0 0 1 .25-2A1 1 0 0 0 8 2.36a10.14 10.14 0 1 0 13.69 12.15 1 1 0 0 0-.05-1.51z"/>
     </svg>
 </button>
+<!-- Toggles the .compact class on <html> (see toggleDensity() above); label text itself flips
+     via the dark/light-style show-hide-by-class trick used for the theme icon above. -->
+<button th:fragment="densityToggle" type="button" onclick="toggleDensity()"
+        title="Toggle compact / comfortable results density"
+        class="rounded p-1.5 text-xs font-mono text-slate-500 hover:bg-slate-100 hover:text-slate-800 transition-colors duration-150
+               dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-slate-100">
+    <span class="density-icon-comfortable">≣</span>
+    <span class="density-icon-compact">≡</span>
+</button>
+<!-- Console is the default look; Signal Room and Default (today's original look) are the other
+     options - see setSkin() above and the skin blocks in the stylesheet. -->
+<select th:fragment="skinSelect" id="skin-select" onchange="setSkin(this.value)"
+        title="Switch visual theme"
+        class="text-xs border border-slate-300 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-1.5 py-1">
+    <option value="console">Console</option>
+    <option value="signal">Signal Room</option>
+    <option value="default">Default</option>
+</select>
+<!-- Only ever visible when the Console skin is active (see .console-font-select CSS above) -
+     Console is the only skin with a dedicated monospace identity worth swapping. -->
+<select th:fragment="consoleFontSelect" id="console-font-select" onchange="setConsoleFont(this.value)"
+        title="Switch Console's font"
+        class="console-font-select text-xs border border-slate-300 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-1.5 py-1">
+    <option value="jetbrains">JetBrains Mono</option>
+    <option value="system">System Mono</option>
+</select>
 </body>
 </html>

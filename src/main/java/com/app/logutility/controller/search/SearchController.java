@@ -60,10 +60,12 @@ public class SearchController {
     }
 
     @GetMapping("/search/select-project")
-    public String selectProject(@RequestParam UUID projectId, HttpServletResponse response) {
-        Cookie cookie = new Cookie(ProjectAdminController.ACTIVE_PROJECT_COOKIE, projectId.toString());
+    public String selectProject(@RequestParam(required = false) UUID projectId, HttpServletResponse response) {
+        // projectId arrives blank when the picker is switched back to its placeholder option -
+        // treat that as "clear the active project" rather than a bad request.
+        Cookie cookie = new Cookie(ProjectAdminController.ACTIVE_PROJECT_COOKIE, projectId == null ? "" : projectId.toString());
         cookie.setPath("/");
-        cookie.setMaxAge((int) Duration.ofDays(30).toSeconds());
+        cookie.setMaxAge(projectId == null ? 0 : (int) Duration.ofDays(30).toSeconds());
         response.addCookie(cookie);
         return "redirect:/";
     }
@@ -103,6 +105,7 @@ public class SearchController {
         model.addAttribute("page", page);
         model.addAttribute("hasPrev", page > 0);
         model.addAttribute("hasNext", (long) (page + 1) * PAGE_SIZE < result.totalMatched());
+        model.addAttribute("totalPages", (int) Math.ceil(result.totalMatched() / (double) PAGE_SIZE));
         return "search :: resultsFragment";
     }
 
