@@ -1,5 +1,6 @@
 package com.in10s.logutility.controller.common;
 
+import com.in10s.logutility.controller.project.ProjectApiController;
 import com.in10s.logutility.controller.search.SearchApiController;
 import com.in10s.logutility.exception.parser.LogbackParseException;
 import com.in10s.logutility.exception.project.ProjectNotFoundException;
@@ -18,7 +19,7 @@ import java.time.Instant;
  * controllers specifically (not the Thymeleaf/HTMX MVC controllers, which render their own error
  * fragments/pages) — this list grows as more {@code *ApiController}s are added.
  */
-@RestControllerAdvice(assignableTypes = { SearchApiController.class })
+@RestControllerAdvice(assignableTypes = { SearchApiController.class, ProjectApiController.class })
 public class ApiExceptionHandler {
 
     @ExceptionHandler(ProjectNotFoundException.class)
@@ -29,6 +30,12 @@ public class ApiExceptionHandler {
     @ExceptionHandler({ LogbackParseException.class, IllegalArgumentException.class })
     public ResponseEntity<ApiError> handleBadRequest(RuntimeException ex, HttpServletRequest request) {
         return body(HttpStatus.BAD_REQUEST, ex.getMessage(), request);
+    }
+
+    /** Duplicate project name — the client asked for something that conflicts with existing state. */
+    @ExceptionHandler(IllegalStateException.class)
+    public ResponseEntity<ApiError> handleConflict(IllegalStateException ex, HttpServletRequest request) {
+        return body(HttpStatus.CONFLICT, ex.getMessage(), request);
     }
 
     /** Malformed or incomplete JSON body (e.g. missing a required field) — a client error, not a 500. */
