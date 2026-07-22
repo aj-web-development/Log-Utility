@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s -o /dev/null -w 'GET /h2-console/ -> HTTP %{http_code}\\\\n' http://localhost:8080/h2-console/)",
+      "Bash(grep -niE \"session|SPRING_SESSION\" /loguty-boot.log)"
+    ]
+  }
+}

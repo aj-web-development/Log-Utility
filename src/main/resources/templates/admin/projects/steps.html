@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<body>
+
+<!-- ============================================================= stepBody
+     Progress indicator + error banner + the current step's content. Returned by
+     every wizard POST and swapped into #wizard-body. ============================== -->
+<div th:fragment="stepBody">
+    <ol class="flex items-center gap-4 mb-6 text-xs">
+        <li th:each="s : ${steps}" class="flex items-center gap-2">
+            <span class="rounded-full w-6 h-6 flex items-center justify-center"
+                  th:classappend="${s.name() == currentStep.name()} ? 'bg-slate-800 text-white' : 'bg-slate-200 text-slate-500'"
+                  th:text="${s.ordinal() + 1}">1</span>
+            <span th:text="${s.label}"
+                  th:classappend="${s.name() == currentStep.name()} ? 'font-medium text-slate-800' : 'text-slate-400'">Step</span>
+        </li>
+    </ol>
+
+    <div th:if="${error}"
+         class="mb-4 text-sm text-red-700 bg-red-50 border border-red-200 rounded p-2" th:text="${error}"></div>
+
+    <!-- th:replace has higher precedence than th:switch/th:case, so each case wraps its
+         th:replace in a nested div — otherwise every case's fragment would be inserted
+         unconditionally before the switch gets a chance to prune the non-matching branches. -->
+    <div th:switch="${currentStep.name()}">
+        <div th:case="'DETAILS'"><div th:replace="~{admin/projects/steps :: detailsStep}"></div></div>
+        <div th:case="'NODES'"><div th:replace="~{admin/projects/steps :: nodesStep}"></div></div>
+        <div th:case="'SAMPLE_LINE'"><div th:replace="~{admin/projects/steps :: sampleLineStep}"></div></div>
+        <div th:case="'FIELDS'"><div th:replace="~{admin/projects/steps :: fieldsStep}"></div></div>
+        <div th:case="'REVIEW'"><div th:replace="~{admin/projects/steps :: reviewStep}"></div></div>
+    </div>
+</div>
+
+<!-- ============================================================= DETAILS -->
+<form th:fragment="detailsStep"
+      hx-post="/admin/projects/wizard/details" hx-target="#wizard-body" hx-swap="innerHTML"
+      class="bg-white rounded-xl shadow p-6 space-y-4">
+    <h2 class="font-semibold">Project details</h2>
+    <div>
+        <label class="block text-sm text-slate-600 mb-1">Name</label>
+        <input name="name" th:value="${form.name}" required
+               class="w-full border border-slate-300 rounded px-3 py-2 text-sm"/>
+    </div>
+    <div>
+        <label class="block text-sm text-slate-600 mb-1">Description</label>
+        <textarea name="description" rows="3"
+                  class="w-full border border-slate-300 rounded px-3 py-2 text-sm"
+                  th:text="${form.description}"></textarea>
+    </div>
+    <div class="flex justify-between items-center pt-2">
+        <a th:href="@{/admin/projects}" class="text-sm text-slate-500 hover:text-slate-800">Cancel</a>
+        <button type="submit"
+                class="bg-slate-800 text-white text-sm rounded px-4 py-2 hover:bg-slate-700">Next &rarr;</button>
+    </div>
+</form>
+
+<!-- ============================================================= NODES -->
+<form th:fragment="nodesStep" hx-target="#wizard-body" hx-swap="innerHTML"
+      class="bg-white rounded-xl shadow p-6 space-y-4">
+    <h2 class="font-semibold">Nodes</h2>
+    <p class="text-sm text-slate-500">Each node is a server/host holding a copy of this project's logs.</p>
+
+    <div th:if="${form.uploadLiveLogHint != null or form.uploadBackupRootHint != null}"
+         class="text-xs bg-blue-50 border border-blue-200 text-blue-800 rounded p-2 space-y-0.5">
+        <div>Detected from the uploaded XML — fill in the real path for each node below:</div>
+        <div th:if="${form.uploadLiveLogHint != null}">
+            Live log file: <code th:text="${form.uploadLiveLogHint}">/var/log/app.log</code></div>
+        <div th:if="${form.uploadBackupRootHint != null}">
+            Backup root prefix: <code th:text="${form.uploadBackupRootHint}">/var/log/archive/</code></div>
+    </div>
+
+    <div class="space-y-4">
+        <div th:each="node, it : ${form.nodes}" th:with="lsid=${node.logSourceId != null ? node.logSourceId : ''}"
+             class="border border-slate-200 rounded p-3 space-y-2">
+            <div class="flex items-center justify-between">
+                <span class="text-xs text-slate-400" th:text="'Node ' + (${it.index} + 1)">Node 1</span>
+                <button type="button"
+                        th:attr="hx-post=@{/admin/projects/wizard/nodes/remove(index=${it.index})}"
+                        hx-include="closest form" hx-target="#wizard-body"
+                        class="text-xs text-red-500 hover:underline">Remove</button>
+            </div>
+            <input th:name="'nodes[' + ${it.index} + '].nodeLabel'" th:value="${node.nodeLabel}"
+                   placeholder="Node label (e.g. node1)" class="w-full border border-slate-300 rounded px-2 py-1 text-sm"/>
+            <input th:id="'live-path-' + ${it.index}"
+                   th:name="'nodes[' + ${it.index} + '].liveLogPath'" th:value="${node.liveLogPath}"
+                   placeholder="Live log path (e.g. /var/log/app/app.log)" class="w-full border border-slate-300 rounded px-2 py-1 text-sm"/>
+            <input th:id="'backup-path-' + ${it.index}"
+                   th:name="'nodes[' + ${it.index} + '].backupRootPath'" th:value="${node.backupRootPath}"
+                   placeholder="Backup root path (e.g. /var/log/app/archive)" class="w-full border border-slate-300 rounded px-2 py-1 text-sm"/>
+            <input th:name="'nodes[' + ${it.index} + '].backupPathPattern'" th:value="${node.backupPathPattern}"
+                   placeholder="Backup pattern (e.g. {date}/app.{HH}.{i}.log.gz)" class="w-full border border-slate-300 rounded px-2 py-1 text-sm"/>
+
+            <div class="flex items-center gap-2 pt-1">
+                <button type="button"
+                        hx-post="/admin/projects/wizard/nodes/test-path"
+                        th:attr="hx-vals=|js:{livePath: document.getElementById('live-path-${it.index}').value, backupPath: document.getElementById('backup-path-${it.index}').value, logSourceId: '${lsid}'}|,
+                                 hx-target=|#path-status-${it.index}|"
+                        hx-swap="innerHTML"
+                        class="text-xs bg-slate-100 text-slate-700 rounded px-2 py-1 hover:bg-slate-200">Test paths</button>
+                <span th:id="'path-status-' + ${it.index}"
+                      th:with="status=${node.lastCheckStatus != null ? node.lastCheckStatus.name() : 'UNKNOWN'}, message=${node.lastCheckMessage}">
+                    <span th:replace="~{admin/projects/path-badge :: badge}"></span>
+                </span>
+            </div>
+        </div>
+    </div>
+
+    <button type="button" hx-post="/admin/projects/wizard/nodes/add"
+            hx-include="closest form" hx-target="#wizard-body"
+            class="text-sm text-slate-600 hover:text-slate-900">+ Add node</button>
+
+    <div class="flex justify-between pt-2">
+        <button type="button" hx-post="/admin/projects/wizard/nodes/back"
+                hx-include="closest form" hx-target="#wizard-body"
+                class="text-sm text-slate-500 hover:text-slate-800">&larr; Back</button>
+        <button type="button" hx-post="/admin/projects/wizard/nodes"
+                hx-include="closest form" hx-target="#wizard-body"
+                class="bg-slate-800 text-white text-sm rounded px-4 py-2 hover:bg-slate-700">Next &rarr;</button>
+    </div>
+</form>
+
+<!-- ============================================================= SAMPLE_LINE -->
+<form th:fragment="sampleLineStep" hx-target="#wizard-body" hx-swap="innerHTML"
+      class="bg-white rounded-xl shadow p-6 space-y-4">
+    <h2 class="font-semibold">Sample line</h2>
+    <p class="text-sm text-slate-500">
+        Paste one representative log line and click Analyze. We'll guess the timestamp, level, and
+        logger token positions — review and correct the suggestions below. This step is optional;
+        leaving it blank falls back to common defaults.
+    </p>
+
+    <div>
+        <label class="block text-xs text-slate-500 mb-1">Sample line</label>
+        <textarea name="linePattern.sampleLine" rows="2"
+                  th:text="${form.linePattern.sampleLine}"
+                  placeholder="2026-07-21 14:30:15.123 [main] INFO com.acme.OrderService - order placed"
+                  class="w-full border border-slate-300 rounded px-2 py-1 text-sm font-mono"></textarea>
+    </div>
+
+    <button type="button" hx-post="/admin/projects/wizard/sample-line/analyze"
+            hx-include="closest form" hx-target="#wizard-body"
+            class="text-sm bg-slate-100 text-slate-700 rounded px-3 py-1.5 hover:bg-slate-200">Analyze</button>
+
+    <div th:if="${analysis != null and !analysis.segments().isEmpty()}" class="space-y-1">
+        <div class="text-xs text-slate-400 flex gap-3">
+            <span><span class="inline-block w-3 h-3 bg-yellow-200 rounded-sm align-middle mr-1"></span>Timestamp</span>
+            <span><span class="inline-block w-3 h-3 bg-green-200 rounded-sm align-middle mr-1"></span>Level</span>
+            <span><span class="inline-block w-3 h-3 bg-blue-200 rounded-sm align-middle mr-1"></span>Logger</span>
+        </div>
+        <div class="border border-slate-200 rounded p-3 font-mono text-xs whitespace-pre-wrap break-all bg-slate-50">
+            <span th:each="seg : ${analysis.segments()}" th:text="${seg.text()}"
+                  th:classappend="${seg.label() == 'timestamp'} ? 'bg-yellow-200' : (${seg.label() == 'level'} ? 'bg-green-200' : (${seg.label() == 'logger'} ? 'bg-blue-200' : ''))"></span>
+        </div>
+    </div>
+
+    <input type="hidden" name="linePattern.timestampRegexOrPosition"
+           th:value="${form.linePattern.timestampRegexOrPosition}"/>
+
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div>
+            <label class="block text-xs text-slate-500 mb-1">Timestamp pattern</label>
+            <input type="text" name="linePattern.timestampPattern" th:value="${form.linePattern.timestampPattern}"
+                   placeholder="yyyy-MM-dd HH:mm:ss.SSS"
+                   class="w-full border border-slate-300 rounded px-2 py-1 text-sm font-mono"/>
+        </div>
+        <div>
+            <label class="block text-xs text-slate-500 mb-1">Level pattern (regex)</label>
+            <input type="text" name="linePattern.levelPattern" th:value="${form.linePattern.levelPattern}"
+                   class="w-full border border-slate-300 rounded px-2 py-1 text-sm font-mono"/>
+        </div>
+        <div>
+            <label class="block text-xs text-slate-500 mb-1">Logger pattern (regex)</label>
+            <input type="text" name="linePattern.loggerPattern" th:value="${form.linePattern.loggerPattern}"
+                   class="w-full border border-slate-300 rounded px-2 py-1 text-sm font-mono"/>
+        </div>
+    </div>
+
+    <div class="flex justify-between pt-2">
+        <button type="button" hx-post="/admin/projects/wizard/sample-line/back"
+                hx-include="closest form" hx-target="#wizard-body"
+                class="text-sm text-slate-500 hover:text-slate-800">&larr; Back</button>
+        <button type="button" hx-post="/admin/projects/wizard/sample-line"
+                hx-include="closest form" hx-target="#wizard-body"
+                class="bg-slate-800 text-white text-sm rounded px-4 py-2 hover:bg-slate-700">Next &rarr;</button>
+    </div>
+</form>
+
+<!-- ============================================================= FIELDS -->
+<form th:fragment="fieldsStep" hx-target="#wizard-body" hx-swap="innerHTML"
+      class="bg-white rounded-xl shadow p-6 space-y-4">
+    <h2 class="font-semibold">Filter fields</h2>
+    <p class="text-sm text-slate-500">Searchable identifier fields (trace id, session id, ...). Optional.</p>
+
+    <div class="space-y-4">
+        <div th:each="field, it : ${form.filterFields}" class="border border-slate-200 rounded p-3 space-y-2">
+            <div class="flex items-center justify-between">
+                <span class="text-xs text-slate-400" th:text="'Field ' + (${it.index} + 1)">Field 1</span>
+                <button type="button"
+                        th:attr="hx-post=@{/admin/projects/wizard/fields/remove(index=${it.index})}"
+                        hx-include="closest form" hx-target="#wizard-body"
+                        class="text-xs text-red-500 hover:underline">Remove</button>
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+                <input th:name="'filterFields[' + ${it.index} + '].key'" th:value="${field.key}"
+                       placeholder="Key (e.g. tid)" class="border border-slate-300 rounded px-2 py-1 text-sm"/>
+                <input th:name="'filterFields[' + ${it.index} + '].label'" th:value="${field.label}"
+                       placeholder="Label (e.g. Trace ID)" class="border border-slate-300 rounded px-2 py-1 text-sm"/>
+                <input th:name="'filterFields[' + ${it.index} + '].mdcKey'" th:value="${field.mdcKey}"
+                       placeholder="MDC key (optional)" class="border border-slate-300 rounded px-2 py-1 text-sm"/>
+                <input th:name="'filterFields[' + ${it.index} + '].linePrefix'" th:value="${field.linePrefix}"
+                       placeholder="Line prefix (e.g. tid=)" class="border border-slate-300 rounded px-2 py-1 text-sm"/>
+                <select th:name="'filterFields[' + ${it.index} + '].matchType'"
+                        class="border border-slate-300 rounded px-2 py-1 text-sm col-span-2">
+                    <option th:each="mt : ${matchTypes}" th:value="${mt}" th:text="${mt}"
+                            th:selected="${field.matchType != null and field.matchType.name() == mt.name()}"></option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <button type="button" hx-post="/admin/projects/wizard/fields/add"
+            hx-include="closest form" hx-target="#wizard-body"
+            class="text-sm text-slate-600 hover:text-slate-900">+ Add field</button>
+
+    <div class="flex justify-between pt-2">
+        <button type="button" hx-post="/admin/projects/wizard/fields/back"
+                hx-include="closest form" hx-target="#wizard-body"
+                class="text-sm text-slate-500 hover:text-slate-800">&larr; Back</button>
+        <button type="button" hx-post="/admin/projects/wizard/fields"
+                hx-include="closest form" hx-target="#wizard-body"
+                class="bg-slate-800 text-white text-sm rounded px-4 py-2 hover:bg-slate-700">Next &rarr;</button>
+    </div>
+</form>
+
+<!-- ============================================================= REVIEW -->
+<div th:fragment="reviewStep" class="bg-white rounded-xl shadow p-6 space-y-4">
+    <h2 class="font-semibold">Review &amp; save</h2>
+
+    <div>
+        <div class="text-xs text-slate-400 uppercase tracking-wide">Name</div>
+        <div th:text="${form.name}">name</div>
+    </div>
+    <div th:unless="${#strings.isEmpty(form.description)}">
+        <div class="text-xs text-slate-400 uppercase tracking-wide">Description</div>
+        <div th:text="${form.description}">description</div>
+    </div>
+    <div>
+        <div class="text-xs text-slate-400 uppercase tracking-wide">Nodes</div>
+        <ul class="list-disc list-inside text-sm">
+            <li th:each="n : ${form.nodes}" th:unless="${#strings.isEmpty(n.nodeLabel)}"
+                th:text="${n.nodeLabel + ' — ' + (n.liveLogPath ?: '(no live path)')}">node</li>
+        </ul>
+    </div>
+    <div th:if="${form.linePattern != null and form.linePattern.hasAnyContent()}">
+        <div class="text-xs text-slate-400 uppercase tracking-wide">Line pattern</div>
+        <ul class="list-disc list-inside text-sm">
+            <li th:unless="${#strings.isEmpty(form.linePattern.timestampPattern)}"
+                th:text="'Timestamp: ' + ${form.linePattern.timestampPattern}">timestamp</li>
+            <li th:unless="${#strings.isEmpty(form.linePattern.levelPattern)}"
+                th:text="'Level: ' + ${form.linePattern.levelPattern}">level</li>
+            <li th:unless="${#strings.isEmpty(form.linePattern.loggerPattern)}"
+                th:text="'Logger: ' + ${form.linePattern.loggerPattern}">logger</li>
+        </ul>
+    </div>
+    <div>
+        <div class="text-xs text-slate-400 uppercase tracking-wide">Filter fields</div>
+        <ul class="list-disc list-inside text-sm">
+            <li th:each="f : ${form.filterFields}" th:unless="${#strings.isEmpty(f.key)}"
+                th:text="${f.label + ' (' + f.key + ', ' + f.matchType + ')'}">field</li>
+            <li th:if="${form.filterFields.isEmpty() or #strings.isEmpty(form.filterFields[0].key)}"
+                class="text-slate-400 list-none">None</li>
+        </ul>
+    </div>
+
+    <div class="flex justify-between pt-2">
+        <button type="button" hx-post="/admin/projects/wizard/review/back" hx-target="#wizard-body" hx-swap="innerHTML"
+                class="text-sm text-slate-500 hover:text-slate-800">&larr; Back</button>
+        <button type="button" hx-post="/admin/projects/wizard/save" hx-target="#wizard-body" hx-swap="innerHTML"
+                class="bg-green-700 text-white text-sm rounded px-4 py-2 hover:bg-green-600">Save project</button>
+    </div>
+</div>
+
+<!-- ============================================================= saved (post-save redirect) -->
+<div th:fragment="saved" class="bg-white rounded-xl shadow p-6 text-slate-600">Saved. Redirecting&hellip;</div>
+
+</body>
+</html>

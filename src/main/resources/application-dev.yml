@@ -1,0 +1,20 @@
+spring:
+  datasource:
+    # In-memory H2 in PostgreSQL-compatibility mode so the same Flyway migrations and
+    # queries that target production Postgres also run locally. DB kept alive for the
+    # whole JVM so the shared in-memory schema survives connection pool churn.
+    url: jdbc:h2:mem:logutility;MODE=PostgreSQL;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ""
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+
+# Throwaway admin credentials for local development only. In production these come from the
+# LOGUTY_ADMIN_USERNAME / LOGUTY_ADMIN_PASSWORD environment variables (see application-prod.yml).
+loguty:
+  admin:
+    username: admin
+    password: admin

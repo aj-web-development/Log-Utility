@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<!--
+  Shared <head> fragment. Pulls in the no-build frontend stack (Tailwind, HTMX, Alpine via
+  CDN) and exposes the CSRF token as meta tags plus an htmx:configRequest hook so that the
+  HTMX-driven admin forms in later phases automatically send the token on write requests.
+-->
+<head th:fragment="head(title)">
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title th:text="${title}">Log Utility</title>
+
+    <meta name="_csrf" th:if="${_csrf}" th:content="${_csrf.token}"/>
+    <meta name="_csrf_header" th:if="${_csrf}" th:content="${_csrf.headerName}"/>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/htmx.org@2.0.3"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            var token = document.querySelector('meta[name="_csrf"]');
+            var header = document.querySelector('meta[name="_csrf_header"]');
+            if (token && header && token.content) {
+                document.body.addEventListener('htmx:configRequest', function (evt) {
+                    evt.detail.headers[header.content] = token.content;
+                });
+            }
+        });
+    </script>
+    <style>
+        /* htmx's loading-indicator convention: elements with this class are hidden by default
+           and shown while their triggering request is in flight (via hx-indicator). */
+        .htmx-indicator { opacity: 0; transition: opacity 150ms ease-in; }
+        .htmx-request.htmx-indicator, .htmx-request .htmx-indicator { opacity: 1; }
+        /* Alpine's convention to prevent a flash of un-toggled content before it initializes. */
+        [x-cloak] { display: none !important; }
+    </style>
+</head>
+</html>

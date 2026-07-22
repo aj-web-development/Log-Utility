@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/head :: head(${form.editing} ? 'Edit project · Log Utility' : 'New project · Log Utility')}"></head>
+<body class="bg-slate-100 min-h-screen text-slate-800">
+    <header class="bg-white border-b border-slate-200">
+        <div class="max-w-3xl mx-auto px-4 py-3 flex items-center justify-between">
+            <a th:href="@{/admin/projects}" class="font-semibold">Log Utility &middot; Admin</a>
+            <a th:href="@{/admin/projects}" class="text-sm text-slate-500 hover:text-slate-800">All projects</a>
+        </div>
+    </header>
+
+    <main class="max-w-3xl mx-auto px-4 py-8">
+        <h1 class="text-lg font-semibold mb-6"
+            th:text="${form.editing} ? 'Edit project' : 'New project'">New project</h1>
+        <!-- HTMX swaps step fragments into this container as the admin advances. -->
+        <div id="wizard-body">
+            <div th:replace="~{admin/projects/steps :: stepBody}"></div>
+        </div>
+    </main>
+</body>
+</html>

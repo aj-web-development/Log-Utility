@@ -1,0 +1,21 @@
+spring:
+  datasource:
+    # Production Postgres connection, supplied entirely through environment variables.
+    url: ${JDBC_DATABASE_URL:jdbc:postgresql://localhost:5432/logutility}
+    username: ${JDBC_DATABASE_USERNAME:logutility}
+    password: ${JDBC_DATABASE_PASSWORD:}
+  # Flyway locations are inherited from application.yml: the portable .../common baseline plus
+  # the {vendor} folder (resolves to db/migration/postgresql here, which includes the Spring
+  # Session tables in V3). To target a different SQL database in production, override
+  # spring.datasource.* (url/username/password + driver), add that database's JDBC driver and
+  # its flyway-database-<db> module, and copy the matching schema-<db>.sql from spring-session-jdbc
+  # into db/migration/<vendor>/.
+  session:
+    jdbc:
+      # Flyway (V3, under db/migration/postgresql) owns the session tables in production, so
+      # Spring Session must not also try to create them.
+      initialize-schema: never
+
+# Admin credentials MUST be provided via environment variables in production:
+#   LOGUTY_ADMIN_USERNAME, LOGUTY_ADMIN_PASSWORD
+# The app fails fast at startup if they are missing (see SecurityConfig#userDetailsService).

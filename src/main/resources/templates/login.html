@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/head :: head('Sign in · Log Utility')}"></head>
+<body class="bg-slate-100 min-h-screen flex items-center justify-center text-slate-800">
+    <div class="w-full max-w-sm bg-white rounded-xl shadow p-8">
+        <h1 class="text-xl font-semibold">Log Utility</h1>
+        <p class="text-sm text-slate-500 mb-6">Admin sign in</p>
+
+        <div th:if="${param.error}"
+             class="mb-4 text-sm text-red-700 bg-red-50 border border-red-200 rounded p-2">
+            Invalid username or password.
+        </div>
+        <div th:if="${param.logout}"
+             class="mb-4 text-sm text-green-700 bg-green-50 border border-green-200 rounded p-2">
+            You have been signed out.
+        </div>
+
+        <!-- Thymeleaf + Spring Security inject the CSRF hidden field into th:action forms. -->
+        <form th:action="@{/login}" method="post" class="space-y-4">
+            <div>
+                <label for="username" class="block text-sm text-slate-600 mb-1">Username</label>
+                <input id="username" name="username" type="text" required autofocus
+                       class="w-full border border-slate-300 rounded px-3 py-2 text-sm"/>
+            </div>
+            <div>
+                <label for="password" class="block text-sm text-slate-600 mb-1">Password</label>
+                <input id="password" name="password" type="password" required
+                       class="w-full border border-slate-300 rounded px-3 py-2 text-sm"/>
+            </div>
+            <button type="submit"
+                    class="w-full bg-slate-800 text-white rounded px-3 py-2 text-sm hover:bg-slate-700">
+                Sign in
+            </button>
+        </form>
+
+        <a th:href="@{/}" class="block text-center text-xs text-slate-400 mt-4 hover:text-slate-600">
+            &larr; Back to search
+        </a>
+    </div>
+</body>
+</html>

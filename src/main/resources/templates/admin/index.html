@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org"
+      xmlns:sec="http://www.thymeleaf.org/extras/spring-security">
+<head th:replace="~{fragments/head :: head('Admin · Log Utility')}"></head>
+<body class="bg-slate-100 min-h-screen text-slate-800">
+    <header class="bg-white border-b border-slate-200">
+        <div class="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
+            <span class="font-semibold">Log Utility &middot; Admin</span>
+            <form th:action="@{/logout}" method="post">
+                <button type="submit" class="text-sm text-slate-600 hover:text-slate-900">Sign out</button>
+            </form>
+        </div>
+    </header>
+    <main class="max-w-5xl mx-auto px-4 py-12">
+        <div class="bg-white rounded-xl shadow p-6">
+            <h1 class="text-lg font-semibold">Welcome, <span th:text="${username}">admin</span></h1>
+            <!-- sec:* attributes come from thymeleaf-extras-springsecurity6; rendering them
+                 confirms the security dialect is active. -->
+            <p class="text-slate-500 text-sm mt-1">
+                Signed in as <span class="font-medium" sec:authentication="name">user</span>,
+                authorities <span sec:authentication="authorities">[ROLE_ADMIN]</span>.
+            </p>
+            <div class="mt-6">
+                <a th:href="@{/admin/projects}"
+                   class="inline-block bg-slate-800 text-white text-sm rounded px-4 py-2 hover:bg-slate-700">
+                    Manage projects &rarr;
+                </a>
+            </div>
+        </div>
+    </main>
+</body>
+</html>

@@ -1,0 +1,42 @@
+spring:
+  application:
+    name: logutility
+  # Local development (H2) is the default profile so `./mvnw spring-boot:run` just works.
+  # Production MUST override with SPRING_PROFILES_ACTIVE=prod (external env wins over this).
+  profiles:
+    active: dev
+  jpa:
+    hibernate:
+      # Flyway is the single source of truth for the schema; Hibernate never alters it.
+      ddl-auto: none
+    open-in-view: false
+    properties:
+      hibernate:
+        "[format_sql]": true
+  flyway:
+    enabled: true
+    # Portable baseline in .../common runs on every SQL database; the {vendor} placeholder
+    # is resolved by Flyway to the running engine (h2, postgresql, mysql, oracle, sqlserver,
+    # ...), so database-specific override scripts can be dropped into db/migration/<vendor>
+    # with no code change. Missing vendor folders are ignored (fail-on-missing-locations is
+    # false by default in Spring Boot).
+    locations: classpath:db/migration/common,classpath:db/migration/{vendor}
+  session:
+    # Persist HTTP sessions in the database (Spring Session JDBC) so a logged-in admin stays
+    # authenticated across app instances that share the same database.
+    timeout: 30m
+    jdbc:
+      # 'embedded' lets Spring Session auto-create its tables on embedded databases (H2 dev).
+      # The prod profile overrides this to 'never' because Flyway owns the session tables there.
+      initialize-schema: embedded
+
+# Log-search engine tuning, consumed by the Phase 6 search pipeline.
+search:
+  max-results: 5000
+  max-nodes-parallel: 16
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
