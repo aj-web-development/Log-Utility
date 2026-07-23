@@ -17,81 +17,75 @@
 
     <main class="max-w-[1800px] w-full mx-auto px-4 py-4 flex-1 min-h-0 flex flex-col gap-4">
 
-        <!-- Project picker + search form - the "not used much once results are showing" chrome
-             the user asked to be able to squeeze away. Collapsible via toggleSearchPanel() in the
-             script block; #panel-toggle-btn (in #results-toolbar) is the control. -->
-        <div id="search-panel" class="flex-none space-y-4">
+        <!-- Project picker + search form, merged into one single-row (wrapping) toolbar - the
+             "not used much once results are showing" chrome the user asked to be able to squeeze
+             away. Collapsible via toggleSearchPanel() in the script block; #panel-toggle-btn (in
+             #results-toolbar) is the control. Two separate <form>s (project-switch is a plain GET
+             navigation; #search-form is htmx-driven) rendered as one visual row via `contents` on
+             each form - see .search-toolbar / html[data-skin=...] .search-toolbar in head.html for
+             the shared card background this replaced .project-picker/#search-form with. -->
+        <div id="search-panel" class="flex-none">
             <div class="empty-state bg-white dark:bg-slate-800 rounded-xl shadow p-8 text-center text-slate-500 dark:text-slate-400" th:if="${projects.isEmpty()}">
                 No projects have been configured yet.
             </div>
 
-            <div class="project-picker bg-white dark:bg-slate-800 rounded-xl shadow p-4" th:unless="${projects.isEmpty()}">
-                <form method="get" th:action="@{/search/select-project}" class="flex items-center gap-2">
-                    <label class="text-sm text-slate-600 dark:text-slate-400" for="projectId">Project</label>
-                    <select id="projectId" name="projectId" onchange="this.form.submit()"
-                            class="border border-slate-300 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-2 py-1 text-sm">
-                        <option value="" th:selected="${activeProject == null}">&mdash; choose a project &mdash;</option>
-                        <option th:each="p : ${projects}" th:value="${p.id()}" th:text="${p.name()}"
-                                th:selected="${activeProject != null and activeProject.id() == p.id()}"></option>
-                    </select>
+            <div th:unless="${projects.isEmpty()}"
+                 class="search-toolbar bg-white dark:bg-slate-800 rounded-xl shadow p-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+                <form method="get" th:action="@{/search/select-project}" class="contents">
+                    <div class="flex items-center gap-1.5">
+                        <label class="text-xs text-slate-500 dark:text-slate-400" for="projectId">Project</label>
+                        <select id="projectId" name="projectId" onchange="this.form.submit()"
+                                class="border border-slate-300 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-2 py-1 text-sm">
+                            <option value="" th:selected="${activeProject == null}">&mdash; choose a project &mdash;</option>
+                            <option th:each="p : ${projects}" th:value="${p.id()}" th:text="${p.name()}"
+                                    th:selected="${activeProject != null and activeProject.id() == p.id()}"></option>
+                        </select>
+                    </div>
+                </form>
+
+                <form id="search-form" th:if="${activeProject != null}" class="contents"
+                      hx-get="/search" hx-target="#results" hx-swap="innerHTML" hx-indicator="#search-spinner, #results-skeleton">
+                    <div class="flex items-center gap-1.5">
+                        <label class="text-xs text-slate-500 dark:text-slate-400" for="from">From</label>
+                        <input id="from" type="datetime-local" name="from"
+                               th:value="${#temporals.format(defaultFrom, 'yyyy-MM-dd''T''HH:mm')}"
+                               class="border border-slate-300 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-2 py-1 text-sm"/>
+                    </div>
+                    <div class="flex items-center gap-1.5">
+                        <label class="text-xs text-slate-500 dark:text-slate-400" for="to">To</label>
+                        <input id="to" type="datetime-local" name="to"
+                               th:value="${#temporals.format(defaultTo, 'yyyy-MM-dd''T''HH:mm')}"
+                               class="border border-slate-300 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-2 py-1 text-sm"/>
+                    </div>
+                    <div class="flex items-center gap-1.5">
+                        <label class="text-xs text-slate-500 dark:text-slate-400" for="freeText">Text</label>
+                        <input id="freeText" type="text" name="freeText" placeholder="contains..."
+                               class="w-36 border border-slate-300 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-2 py-1 text-sm"/>
+                    </div>
+                    <div class="flex items-center gap-1.5" th:each="f : ${activeProject.fields()}">
+                        <label class="text-xs text-slate-500 dark:text-slate-400" th:text="${f.label()}"
+                               th:for="'filter_' + ${f.key()}">Field</label>
+                        <input type="text" th:id="'filter_' + ${f.key()}" th:name="'filter_' + ${f.key()}"
+                               class="w-28 border border-slate-300 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-2 py-1 text-sm"/>
+                    </div>
+                    <input type="hidden" name="page" value="0"/>
+                    <!-- /search itself reads the active project from a cookie, so this field is
+                         unused by that endpoint - it exists so downloadResults()'s
+                         FormData(#search-form) has a projectId to send to /api/search/export,
+                         which (unlike /search) requires it as an explicit request parameter. -->
+                    <input type="hidden" name="projectId" th:value="${activeProject.id()}"/>
+                    <div class="flex items-center gap-2">
+                        <button type="submit"
+                                class="bg-slate-800 dark:bg-slate-700 text-white text-sm rounded px-4 py-2 hover:bg-slate-700 dark:hover:bg-slate-600 transition-colors duration-150">Search</button>
+                        <svg id="search-spinner" class="htmx-indicator animate-spin h-5 w-5 text-slate-400"
+                             xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor"
+                                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                        </svg>
+                    </div>
                 </form>
             </div>
-
-            <form id="search-form" th:if="${activeProject != null}"
-                  hx-get="/search" hx-target="#results" hx-swap="innerHTML" hx-indicator="#search-spinner, #results-skeleton"
-                  class="sticky top-0 z-10 bg-white dark:bg-slate-800 rounded-xl shadow p-4 space-y-3">
-                <div class="flex flex-col sm:flex-row sm:items-start gap-4">
-                    <div class="sm:w-60 shrink-0">
-                        <div class="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500 mb-1.5">When</div>
-                        <div class="grid grid-cols-2 gap-2">
-                            <div>
-                                <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1" for="from">From</label>
-                                <input id="from" type="datetime-local" name="from"
-                                       th:value="${#temporals.format(defaultFrom, 'yyyy-MM-dd''T''HH:mm')}"
-                                       class="w-full border border-slate-300 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-2 py-1 text-sm"/>
-                            </div>
-                            <div>
-                                <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1" for="to">To</label>
-                                <input id="to" type="datetime-local" name="to"
-                                       th:value="${#temporals.format(defaultTo, 'yyyy-MM-dd''T''HH:mm')}"
-                                       class="w-full border border-slate-300 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-2 py-1 text-sm"/>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="flex-1 sm:border-l sm:border-slate-200 sm:dark:border-slate-700 sm:pl-4">
-                        <div class="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500 mb-1.5">What</div>
-                        <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                            <div>
-                                <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1" for="freeText">Free text</label>
-                                <input id="freeText" type="text" name="freeText" placeholder="contains..."
-                                       class="w-full border border-slate-300 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-2 py-1 text-sm"/>
-                            </div>
-                            <div th:each="f : ${activeProject.fields()}">
-                                <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1" th:text="${f.label()}"
-                                       th:for="'filter_' + ${f.key()}">Field</label>
-                                <input type="text" th:id="'filter_' + ${f.key()}" th:name="'filter_' + ${f.key()}"
-                                       class="w-full border border-slate-300 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-2 py-1 text-sm"/>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <input type="hidden" name="page" value="0"/>
-                <!-- /search itself reads the active project from a cookie, so this field is unused
-                     by that endpoint - it exists so downloadResults()'s FormData(#search-form) has
-                     a projectId to send to /api/search/export, which (unlike /search) requires it
-                     as an explicit request parameter. -->
-                <input type="hidden" name="projectId" th:value="${activeProject.id()}"/>
-                <div class="flex items-center gap-3 pt-1">
-                    <button type="submit"
-                            class="bg-slate-800 dark:bg-slate-700 text-white text-sm rounded px-4 py-2 hover:bg-slate-700 dark:hover:bg-slate-600 transition-colors duration-150">Search</button>
-                    <svg id="search-spinner" class="htmx-indicator animate-spin h-5 w-5 text-slate-400"
-                         xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                        <path class="opacity-75" fill="currentColor"
-                              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-                    </svg>
-                </div>
-            </form>
         </div>
 
         <!-- View-mode (Cards/Stream), Group-by, and the search-panel collapse toggle are
@@ -217,10 +211,11 @@
             <div th:unless="${result.lines().isEmpty()}" class="flex-1 min-h-0 overflow-y-auto">
                 <div id="cards-view" class="space-y-2 results-list">
                     <div th:each="line : ${result.lines()}" x-data="{ expanded: false }"
-                         class="log-card bg-white dark:bg-slate-800 rounded-xl shadow p-3 text-sm">
+                         class="log-card bg-white dark:bg-slate-800 rounded-xl shadow p-3 text-xs">
                         <div class="flex flex-wrap items-center gap-2 mb-1.5">
                             <span class="log-timestamp font-mono text-xs text-slate-500 dark:text-slate-400"
-                                  th:text="${line.timestamp() != null ? #temporals.format(line.timestamp(), 'yyyy-MM-dd HH:mm:ss') : '—'}"></span>
+                                  th:attr="data-ts-raw=${line.timestamp() != null ? #temporals.format(line.timestamp(), 'yyyy-MM-dd''T''HH:mm:ss.SSS') : null}"
+                                  th:text="${line.timestamp() != null ? #temporals.format(line.timestamp(), 'yyyy-MM-dd HH:mm:ss.SSS') : '—'}"></span>
                             <span class="log-level text-xs rounded px-2 py-0.5"
                                   th:classappend="${line.level() == 'ERROR' or line.level() == 'FATAL'} ? 'level-error' : (${line.level() == 'WARN' or line.level() == 'WARNING'} ? 'level-warn' : (${line.level() == 'INFO'} ? 'level-info' : (${line.level() == 'DEBUG' or line.level() == 'TRACE'} ? 'level-debug' : 'level-other')))"
                                   th:text="${line.level() != null ? line.level() : '—'}"></span>
@@ -303,12 +298,82 @@
             return 'level-other';
         }
 
+        function pad2(n) { return (n < 10 ? '0' : '') + n; }
+        function pad3(n) { return (n < 10 ? '00' : n < 100 ? '0' : '') + n; }
+
+        function formatLocalTimestamp(date) {
+            return date.getFullYear() + '-' + pad2(date.getMonth() + 1) + '-' + pad2(date.getDate()) + ' ' +
+                   pad2(date.getHours()) + ':' + pad2(date.getMinutes()) + ':' + pad2(date.getSeconds()) +
+                   '.' + pad3(date.getMilliseconds());
+        }
+
+        // The backend keeps a parsed log timestamp as a wall-clock LocalDateTime with no zone
+        // attached (see DefaultLogLineParser - it parses the digits but deliberately ignores any
+        // offset/zone the line prints, since date-range search compares wall-clock values). That
+        // value is rendered verbatim into data-ts-raw. This matches at the very start of the first
+        // physical line only (see DefaultLogLineParser.timestamp(), which parses from position 0),
+        // including any trailing zone/offset the line prints (e.g. "+0530", "Z") in group 1 - used
+        // below only to strip that text out of the displayed message, not for the time conversion
+        // itself (see processLogCards).
+        var LEADING_TIMESTAMP_RE = /^\[?\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[.,]\d{1,9})?(?:\s?(Z|[+-]\d{2}:?\d{2}))?\]?\s*/;
+
+        // Converts a card's timestamp badge to the viewer's local time and strips the now-
+        // redundant timestamp/level text from its message body - one combined pass, since both
+        // need the same leading-timestamp match against the raw line. The raw wall-clock digits
+        // (data-ts-raw) are always treated as UTC for this conversion, regardless of whatever
+        // zone/offset the line itself prints after them (e.g. "+0530") - that printed offset is
+        // display-only noise here, not a reliable second source of truth: several projects' log
+        // lines carry a static/misconfigured offset suffix that doesn't actually describe the zone
+        // the digits were written in, so honoring it selectively produced worse results (no
+        // conversion at all for those lines) than uniformly assuming UTC.
+        function processLogCards() {
+            document.querySelectorAll('#cards-view .log-card').forEach(function (card) {
+                var textEl = card.querySelector('.log-line-text');
+                if (!textEl) return;
+                var tsEl = card.querySelector('.log-timestamp');
+                var lvlEl = card.querySelector('.log-level');
+                var hasTimestamp = !!(tsEl && tsEl.hasAttribute('data-ts-raw'));
+                var levelText = lvlEl ? lvlEl.textContent.trim() : '';
+                var hasLevel = !!(levelText && levelText !== '—');
+
+                if (!hasTimestamp && !hasLevel) return;
+
+                var text = textEl.textContent;
+                var splitAt = text.indexOf('\n');
+                var firstLine = splitAt === -1 ? text : text.slice(0, splitAt);
+                var rest = splitAt === -1 ? '' : text.slice(splitAt);
+
+                if (hasTimestamp) {
+                    var raw = tsEl.getAttribute('data-ts-raw');
+                    var d = new Date(raw + 'Z');
+                    if (!isNaN(d.getTime())) {
+                        tsEl.textContent = formatLocalTimestamp(d);
+                    }
+                    var tsMatch = firstLine.match(LEADING_TIMESTAMP_RE);
+                    if (tsMatch) firstLine = firstLine.slice(tsMatch[0].length);
+                }
+                // Matches this card's own extracted level value (not a hardcoded keyword list -
+                // custom projects can configure any vocabulary, e.g. "SEVERE"), wherever it first
+                // appears on the first line - mirrors DefaultLogLineParser.level(), which also
+                // takes the first match anywhere in the line, so this removes exactly the
+                // substring that produced the badge, nothing more.
+                if (hasLevel) {
+                    var levelRe = new RegExp('\\[?\\b' + escapeRegExp(levelText) + '\\b\\]?\\s*[:\\-]?\\s*');
+                    firstLine = firstLine.replace(levelRe, '');
+                }
+
+                var newText = firstLine + rest;
+                if (newText !== text) textEl.textContent = newText;
+            });
+        }
+
         // Called by the shared htmx:afterSwap listener in fragments/head.html whenever
         // #results is re-rendered (search, page next/prev, page jump). Everything here reads
         // from the live #search-form / #results-toolbar controls and the freshly-rendered
         // #results markup - the controller doesn't echo request params back into the model, so
         // this can't be done server-side without touching SearchController.
         function onResultsSwapped() {
+            processLogCards();
             renderStatsStrip();
             renderFilterChips();
             captureEntries();
@@ -550,6 +615,17 @@
 
             var row = document.createElement('div');
             row.className = 'log-row';
+
+            // Fixed-width gutter, always first: on a narrow viewport / long node names, the
+            // fixed-width badges (timestamp/level/node) plus a trailing toggle can collectively
+            // overflow the row, and since horizontal scroll starts at position 0 (the row's start),
+            // a toggle parked at the *end* scrolls out of reach - unclickable until the user
+            // scrolls right first. Reserved (empty) even for non-expandable rows so every row's
+            // timestamp lines up at the same x position, expandable or not.
+            var toggleSlot = document.createElement('span');
+            toggleSlot.className = 'log-row-toggle-slot';
+            row.appendChild(toggleSlot);
+
             var ts = document.createElement('span'); ts.className = 'log-timestamp'; ts.textContent = entry.timestamp;
             var lvl = document.createElement('span'); lvl.className = 'log-level ' + levelSemanticClass(entry.level); lvl.textContent = entry.level || '—';
             var node = document.createElement('span'); node.className = 'log-node'; node.textContent = entry.node;
@@ -572,7 +648,7 @@
                     extra.style.display = showing ? 'none' : 'block';
                     toggle.textContent = showing ? '▸' : '▾';
                 });
-                row.appendChild(toggle);
+                toggleSlot.appendChild(toggle);
                 wrap.appendChild(extra);
             }
             return wrap;

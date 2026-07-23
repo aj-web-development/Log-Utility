@@ -151,13 +151,23 @@
            doesn't have to fight that utility's own (version-dependent) generated selector. */
         .results-list > * + * { margin-top: 0.5rem; }
         html.compact .results-list > * + * { margin-top: 0; }
-        html.compact #results .log-line-text { font-size: 0.75rem; }
+        /* Comfortable's own .log-line-text is already text-xs (0.75rem, see .log-card in
+           search.html) - compact needs to go a step smaller than that to still read as denser. */
+        html.compact #results .log-line-text { font-size: 0.7rem; }
 
         /* densityToggle fragment's icon swap - same show/hide-by-ancestor-class idea as the
            dark/light sun-moon icons above, but for .compact since that's not a Tailwind variant. */
         .density-icon-compact { display: none; }
         html.compact .density-icon-comfortable { display: none; }
         html.compact .density-icon-compact { display: inline; }
+
+        /* Theme toggle's moon icon: can't use Tailwind's `hidden dark:block` here (that's the
+           literal `.hidden` class), because it collides with the global `.hidden{!important}`
+           rule above - `!important` always wins over `dark:block`'s plain `display:block`, so the
+           moon stayed permanently hidden and the button showed no icon at all once dark mode was
+           on. This mirrors the density-icon pattern above instead, which isn't named `hidden`. */
+        .theme-icon-moon { display: none; }
+        html.dark .theme-icon-moon { display: block; }
 
         /* ===================================================================================
            Semantic color tokens, "Default" values (i.e. what you see with no skin selected).
@@ -236,17 +246,23 @@
 
         /* Terminal-stream row layout (built client-side, see buildStreamRow() in search.html). */
         #stream-view { display: flex; flex-direction: column; }
-        .log-row { display: flex; align-items: baseline; gap: 0.6rem; padding: 0.2rem 0.4rem; font-size: 0.8rem; }
+        .log-row { display: flex; align-items: baseline; gap: 0.6rem; padding: 0.2rem 0.4rem; font-size: 0.72rem; }
+        /* Fixed-width gutter for the expand toggle, always the row's first child (even when
+           empty, for rows with nothing to expand) - keeps every row's toggle at the row's start,
+           where horizontal scroll always begins, instead of the end, where it can scroll out of
+           reach on a narrow viewport or with long node names (see buildStreamRow()). Also keeps
+           every row's timestamp aligned to the same x position. */
+        .log-row-toggle-slot { flex: 0 0 1rem; display: flex; align-items: center; justify-content: center; }
         .log-row .log-timestamp { font-family: ui-monospace, Consolas, monospace; font-size: 0.72rem; color: var(--tag-fg); white-space: nowrap; }
         .log-row .log-node { background: none; padding: 0; font-size: 0.72rem; }
         .log-row .log-line-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, Consolas, monospace; }
         .log-row-expand {
             font: inherit; font-size: 0.72rem; border: none; background: none; cursor: pointer;
-            color: var(--tag-fg); flex-shrink: 0;
+            color: var(--tag-fg); padding: 0;
         }
         .log-row-extra {
-            font-family: ui-monospace, Consolas, monospace; font-size: 0.74rem; color: var(--tag-fg);
-            white-space: pre-wrap; padding: 0.2rem 0.4rem 0.4rem 2.6rem;
+            font-family: ui-monospace, Consolas, monospace; font-size: 0.72rem; color: var(--tag-fg);
+            white-space: pre-wrap; padding: 0.2rem 0.4rem 0.4rem 3rem;
         }
 
         /* Group-by sections - built client-side, see applyGrouping() in search.html. */
@@ -292,8 +308,7 @@
             font-family: var(--console-mono-stack);
         }
         html[data-skin="console"] header { background: var(--console-panel-bg) !important; border-bottom: 1px solid var(--console-line); }
-        html[data-skin="console"] .project-picker,
-        html[data-skin="console"] #search-form {
+        html[data-skin="console"] .search-toolbar {
             background: var(--console-panel-bg) !important; box-shadow: none; border: 1px solid var(--console-line); border-radius: 0;
         }
         html[data-skin="console"] input, html[data-skin="console"] select {
@@ -347,8 +362,7 @@
             font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
         }
         html[data-skin="signal"] header { background: var(--signal-page-bg) !important; border-bottom: 1px solid var(--signal-line); }
-        html[data-skin="signal"] .project-picker,
-        html[data-skin="signal"] #search-form {
+        html[data-skin="signal"] .search-toolbar {
             background: var(--signal-panel-bg) !important; box-shadow: none; border: 1px solid var(--signal-line); border-radius: 6px;
         }
         html[data-skin="signal"] input, html[data-skin="signal"] select {
@@ -405,7 +419,7 @@
     <svg class="w-5 h-5 dark:hidden" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
         <path d="M12 3a1 1 0 0 1 1 1v1a1 1 0 1 1-2 0V4a1 1 0 0 1 1-1zm0 5a4 4 0 1 1 0 8 4 4 0 0 1 0-8zm9 4a1 1 0 0 1-1 1h-1a1 1 0 1 1 0-2h1a1 1 0 0 1 1 1zM4 13a1 1 0 0 1 0-2h1a1 1 0 1 1 0 2H4zm14.657-6.657a1 1 0 0 1 0 1.414l-.707.707a1 1 0 1 1-1.414-1.414l.707-.707a1 1 0 0 1 1.414 0zM6.343 17.657a1 1 0 0 1 0 1.414l-.707.707a1 1 0 1 1-1.414-1.414l.707-.707a1 1 0 0 1 1.414 0zM12 19a1 1 0 0 1 1 1v1a1 1 0 1 1-2 0v-1a1 1 0 0 1 1-1zm6.657 1.657a1 1 0 0 1-1.414 0l-.707-.707a1 1 0 1 1 1.414-1.414l.707.707a1 1 0 0 1 0 1.414zM5.636 6.343a1 1 0 0 1-1.414 0l-.707-.707A1 1 0 1 1 4.93 4.222l.707.707a1 1 0 0 1 0 1.414z"/>
     </svg>
-    <svg class="hidden w-5 h-5 dark:block" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+    <svg class="theme-icon-moon w-5 h-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
         <path d="M21.64 13a1 1 0 0 0-1.05-.14 8.05 8.05 0 0 1-3.37.73 8.15 8.15 0 0 1-8.14-8.1 8.59 8.59 0 0 1 .25-2A1 1 0 0 0 8 2.36a10.14 10.14 0 1 0 13.69 12.15 1 1 0 0 0-.05-1.51z"/>
     </svg>
 </button>
