@@ -23,8 +23,8 @@ import java.time.Instant;
 
 /**
  * Uniform JSON error body for the REST API. Scoped via {@code assignableTypes} to the REST
- * controllers specifically (not the Thymeleaf/HTMX MVC controllers, which render their own error
- * fragments/pages) — this list grows as more {@code *ApiController}s are added.
+ * controllers specifically (not {@code SpaController}, which just forwards to the SPA shell) —
+ * this list grows as more {@code *ApiController}s are added.
  */
 @RestControllerAdvice(assignableTypes = {
         SearchApiController.class, SearchStreamController.class, ProjectApiController.class })

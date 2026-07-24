@@ -4,10 +4,8 @@ import com.app.logutility.request.project.FilterFieldForm;
 import com.app.logutility.request.project.ProjectWizardForm;
 
 /**
- * What makes a {@link ProjectWizardForm} valid to persist. Shared by the Thymeleaf wizard
- * (which also uses these per-step, to gate moving on to the next step) and the REST API (which
- * only needs the final check before create/update) so the two front doors can never drift apart
- * on what counts as a valid project.
+ * What makes a {@link ProjectWizardForm} valid to persist. Used by {@code ProjectApiController}
+ * before create/update.
  */
 public final class ProjectWizardValidation {
 

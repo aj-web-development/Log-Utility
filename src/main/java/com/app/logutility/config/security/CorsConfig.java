@@ -11,7 +11,7 @@ import java.util.Arrays;
 import java.util.List;
 
 /**
- * CORS for the REST API ({@code /api/**} only — the Thymeleaf UI is always same-origin and
+ * CORS for the REST API ({@code /api/**} only — the bundled React SPA is always same-origin and
  * doesn't need it). Allowed origins are opt-in via {@code loguty.api.cors.allowed-origins}; empty
  * by default, so no browser-based external UI can call the API cross-origin until the admin
  * explicitly configures its origin.

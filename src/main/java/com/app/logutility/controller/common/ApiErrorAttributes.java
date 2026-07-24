@@ -16,8 +16,8 @@ import java.util.Map;
  * before a handler method is invoked, falls through to Spring Boot's default {@code /error}
  * handling instead, whose JSON body doesn't match {@link ApiError}'s shape (notably, it omits
  * {@code message} unless {@code server.error.include-message} is set). This reshapes exactly
- * those {@code /api/**} responses into the same {@code ApiError} fields, without touching error
- * rendering for the Thymeleaf UI's paths.
+ * those {@code /api/**} responses into the same {@code ApiError} fields, leaving Boot's default
+ * error handling untouched for everything else.
  */
 @Component
 public class ApiErrorAttributes extends DefaultErrorAttributes {

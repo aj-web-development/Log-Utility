@@ -15,7 +15,7 @@ Companion docs: [README.md](../README.md) (user-facing: how to run/build/deploy)
 [CLAUDE.md](../CLAUDE.md) (short-form guidance for Claude Code — this document is the expanded
 version of the same material).
 
-Last verified against the code: 2026-07-23.
+Last verified against the code: 2026-07-24.
 
 ---
 
@@ -29,25 +29,27 @@ multiple nodes, each of which may write more than one distinct log output (e.g. 
 session id, ...), or by free text. Search requires no login. Only project configuration sits
 behind a single admin account.
 
-The app exposes **two parallel front doors** to the same underlying services:
-
-1. A server-rendered Thymeleaf + HTMX + Alpine.js UI (public search page, admin wizard).
-2. A JSON REST API (`/api/**`), including a Server-Sent-Events streaming search endpoint and a
-   plain-text export endpoint, documented via springdoc-openapi (`/swagger-ui.html`).
+The backend exposes one JSON REST API (`/api/**`), including a Server-Sent-Events streaming search
+endpoint and a plain-text export endpoint, documented via springdoc-openapi (`/swagger-ui.html`).
+The UI is a React single-page app (`frontend/`) that consumes that same API — there is no
+server-rendered page anymore; the Spring Boot app's only non-API HTTP responsibility is serving the
+SPA's static build and forwarding its client-side routes to `index.html`.
 
 ## 2. Tech stack & versions
 
 - **Java 21** (floor, not ceiling — virtual threads and other 21-only APIs are used freely).
-- **Spring Boot 4.1.0** → Spring Framework 7, Jakarta EE 11, Spring Security 7, Spring Session
-  4.1.0, Hibernate ORM 7. Not the Boot 3.x line most tutorials/training data assume.
+- **Spring Boot 4.1.0** → Spring Framework 7, Jakarta EE 11, Spring Security 7, Hibernate ORM 7.
+  Not the Boot 3.x line most tutorials/training data assume.
 - **Maven** (`./mvnw` / `mvnw.cmd`). GroupId `com.app`, artifactId `logutility`, base package
   `com.app.logutility`.
 - **springdoc-openapi-starter-webmvc-ui** (3.0.3) — auto-generates `/v3/api-docs` and
   `/swagger-ui.html` from the REST controllers' `@Operation`/`@Tag` annotations.
 - **PostgreSQL** (prod) / **H2** (dev, `MODE=PostgreSQL`), via **Flyway**.
-- **Thymeleaf + HTMX 2.0.3 + Alpine.js 3.x + Tailwind** — all via CDN `<script>` tags in
-  [fragments/head.html](../src/main/resources/templates/fragments/head.html), zero Node/frontend
-  build step.
+- **`frontend/`**: React 19, TanStack Router (client-only, file-based routes, no SSR) + TanStack
+  Query, shadcn/Radix components, Tailwind v4, built with Vite. Built by Maven
+  (`com.github.eirslett:frontend-maven-plugin`, downloads its own pinned Node — not required on
+  `PATH`) straight into `src/main/resources/static`, so `mvnw clean package` still produces one
+  self-contained jar/war.
 - Lombok (`@Getter`/`@Setter`/`@RequiredArgsConstructor`) on entities, form-backing objects, and
   services. **DTOs crossing an HTTP boundary are Java `record`s**, never Lombok classes.
 
@@ -56,14 +58,16 @@ The app exposes **two parallel front doors** to the same underlying services:
 In Spring Boot 4, auto-configuration for non-core integrations moved out of the starter jars into
 separate `spring-boot-<tech>` modules. **Adding a library's raw jar to the classpath is often not
 enough to activate it** — no exception, no warning, it just silently does nothing. This has already
-happened four times in this codebase:
+happened in this codebase:
 
 | Integration | Symptom when the module was missing | Fix |
 |---|---|---|
 | Flyway | Zero Flyway log lines at boot; no tables created; app "boots successfully" anyway | add `org.springframework.boot:spring-boot-flyway` |
-| Spring Session JDBC | Would silently fall back to in-memory sessions | add `org.springframework.boot:spring-boot-session-jdbc` (+ `spring-session-jdbc` for the repository itself) |
 | H2 web console | `/h2-console` → 404 even with `spring.h2.console.enabled=true` | add `org.springframework.boot:spring-boot-h2console` |
 | MockMvc test support | `@AutoConfigureMockMvc`/`@WebMvcTest` unresolvable from `spring-boot-starter-test` | moved to `spring-boot-webmvc-test` — this repo sidesteps it entirely by building `MockMvc` manually: `MockMvcBuilders.webAppContextSetup(ctx).apply(springSecurity()).build()` in every controller test's `@BeforeEach` |
+
+(Spring Session JDBC used to be a third example here — it's been removed entirely along with the
+Thymeleaf UI that needed it; the app is fully stateless now, see §6.)
 
 **Rule of thumb:** when adding any new integration that isn't a `spring-boot-starter-*`, check the
 `spring-boot-dependencies` BOM for a matching `spring-boot-<tech>` artifact, add it, and verify the
@@ -75,24 +79,38 @@ integration actually activates (grep the boot log, or curl the endpoint) — nev
 
 ```bash
 mvnw.cmd spring-boot:run              # dev profile (H2), default — http://localhost:8080
-mvnw.cmd clean package                # executable jar → target/logutility-0.0.1-SNAPSHOT.jar
+mvnw.cmd clean package                # builds frontend/ (npm ci && npm run build), then the executable jar → target/logutility-0.0.1-SNAPSHOT.jar
 mvnw.cmd clean package -Pwar21        # WAR for an external servlet container → target/logutility-java21.war
-mvnw.cmd test                         # full suite
+mvnw.cmd test                         # full suite (also builds frontend/ first - see the frontend-maven-plugin's generate-resources binding in pom.xml)
 mvnw.cmd test -Dtest=ClassName        # single test class
 mvnw.cmd test -Dtest=ClassName#method # single test method
 ```
 
+```bash
+cd frontend && npm run dev            # Vite dev server (port 5173), proxies /api to localhost:8080 - run alongside `mvnw spring-boot:run`
+cd frontend && npm run build          # what the Maven build calls; writes straight into ../src/main/resources/static
+```
+
 - `war21` requires a JDK 21 entry in `~/.m2/toolchains.xml` (uses `maven-toolchains-plugin`); WAR
   packaging marks embedded Tomcat `provided` since the external container supplies it.
-- Dev admin login: `admin` / `admin` (from `application-dev.yml`, dev-profile only, throwaway).
+- Dev admin login: `admin` / `admin` (from `application-dev.yml`, dev-profile only, throwaway) —
+  the React login page verifies it by sending it as HTTP Basic against `GET /api/projects` (there's
+  no separate JSON login endpoint; see §6 and §10).
 - Prod requires `SPRING_PROFILES_ACTIVE=prod` + `LOGUTY_ADMIN_USERNAME`/`LOGUTY_ADMIN_PASSWORD`
   (app **fails fast at startup** without them, `SecurityConfig#userDetailsService`) +
   `JDBC_DATABASE_URL`/`_USERNAME`/`_PASSWORD`.
 - No CI/CD config and no Docker/containerization files exist in this repo.
+- The `frontend-maven-plugin`'s Node download can be flaky on some machines (antivirus/real-time
+  scanning intercepting the freshly-extracted `node.exe`, or a corrupted npm cache download) — if
+  `install-node-and-npm` or `npm ci` fails, delete `frontend/node` (and, if `npm ci` itself reports
+  `ENOTEMPTY`/a corrupted-tarball warning, `frontend/node_modules` + `frontend/package-lock.json`
+  too) and re-run; it has reliably succeeded on retry every time this has come up so far.
 
 Most tests are fast unit tests with no Spring context (search pipeline, Logback XML parser,
 sample-line analyzer). `*IntegrationTest` classes boot the full app against the H2 dev profile.
-`config.security.SecurityIntegrationTest` covers both filter chains.
+`config.security.SecurityIntegrationTest` covers the one security chain, including that
+`/admin/**` now serves the public SPA shell (no more session redirect) while `/api/projects/**`
+still bare-401s an anonymous request.
 
 ## 4. Package map — layer first, then domain
 
@@ -104,30 +122,30 @@ not one `project` package. The domain name is always the *second* path segment.
 com.app.logutility
 ├─ LogutilityApplication        extends SpringBootServletInitializer (WAR-deployable + runnable jar)
 ├─ config
-│   ├─ security   AdminProperties, SecurityConfig (2 filter chains), CorsConfig, DevH2ConsoleSecurityConfig
+│   ├─ security   AdminProperties, SecurityConfig (1 stateless filter chain), CorsConfig, DevH2ConsoleSecurityConfig
 │   ├─ search     SearchProperties (search.* tuning), SearchConfig (Clock + Semaphore beans)
 │   └─ openapi    OpenApiConfig (springdoc metadata + basic-auth security scheme)
 ├─ controller
-│   ├─ web        AdminController (/admin landing), LoginController (/login page)
-│   ├─ project    ProjectAdminController (list/activate/delete), ProjectWizardController (HTMX wizard),
-│   │              ProjectApiController (REST CRUD + helpers)
-│   ├─ search     SearchController (public HTMX search page), SearchApiController (REST search),
-│   │              SearchStreamController (SSE + plain-text export)
+│   ├─ web        SpaController (forwards /, /login, /admin/** to the SPA's index.html)
+│   ├─ project    ProjectApiController (REST CRUD + wizard-helper endpoints)
+│   ├─ search     SearchApiController (REST search), SearchStreamController (SSE + plain-text export)
 │   └─ common     ApiExceptionHandler (@RestControllerAdvice for the 3 REST controllers above),
 │                  ApiErrorAttributes (reshapes Boot's default /error body for unmatched /api/** routes)
 ├─ entity.project      Project, LogSource, LogFile, FilterField, LinePattern, MatchType, CheckStatus
 ├─ repository.project  ProjectRepository, LogSourceRepository, LogFileRepository,
 │                       FilterFieldRepository, LinePatternRepository
 ├─ request
-│   ├─ project    ProjectWizardForm, NodeForm, LogFileForm, FilterFieldForm, LinePatternForm (session-held,
-│   │              mutable, Serializable — the wizard draft) + ProjectRequest, NodeRequest, LogFileRequest,
-│   │              FilterFieldRequest, LinePatternRequest, PathCheckRequest (REST request records)
+│   ├─ project    ProjectWizardForm, NodeForm, LogFileForm, FilterFieldForm, LinePatternForm (plain
+│   │              in-memory validation/persistence adapter objects now - ProjectApiController builds
+│   │              one fresh per create/update request, nothing session-held anymore) +
+│   │              ProjectRequest, NodeRequest, LogFileRequest, FilterFieldRequest, LinePatternRequest,
+│   │              PathCheckRequest (REST request records)
 │   ├─ parser     SampleLineRequest
 │   └─ search     SearchRequest
 ├─ response
 │   ├─ project    ProjectDetailResponse, NodeResponse, LogFileResponse, FilterFieldResponse,
 │   │              LinePatternResponse, PathCheckOutcome, ProjectSummaryDto, PublicProjectView,
-│   │              PublicFilterFieldView, WizardStep (enum)
+│   │              PublicFilterFieldView
 │   ├─ parser     LogbackParseResult, MdcFieldSuggestion, SampleLineAnalysis, HighlightSegment, TokenMatch
 │   ├─ search     LogLine, SearchResult, SearchSummary, SearchProgress
 │   ├─ validation PathCheckResult
@@ -180,33 +198,44 @@ Project (name UNIQUE, description, createdAt, updatedAt)
 - `ProjectRepository.findAllSummaries()` returns `ProjectSummaryDto` via a JPQL constructor
   expression with count subqueries — one query for the whole admin list, no N+1.
 
-## 6. Two front doors, two security filter chains
+## 6. One stateless security chain
 
-`SecurityConfig` defines two independent `SecurityFilterChain` beans, each scoped by
-`HttpSecurity#securityMatcher` so requests are routed to exactly one:
+`SecurityConfig` used to define two independent `SecurityFilterChain` beans (one for the JSON API,
+one for a server-rendered Thymeleaf/HTMX UI with form login and Spring Session JDBC). That
+Thymeleaf UI is gone, replaced by the React SPA in `frontend/`, and an SPA has nothing left for a
+*server-side* session to gate — the shell has to load for anyone so its own client-side JS can
+decide what to render. So `SecurityConfig` now defines **one** stateless `SecurityFilterChain`:
 
-- **`apiSecurityFilterChain`** (`@Order(2)`, matches `/api/**`) — stateless HTTP Basic, no
-  session (`SessionCreationPolicy.STATELESS`), CSRF disabled (a cookie-less `Authorization` header
-  on every request doesn't need CSRF protection). `/api/search/**` is `permitAll`; everything else
-  under `/api/**` (i.e. `/api/projects/**`) requires the admin account via HTTP Basic.
-- **`appSecurityFilterChain`** (`@Order(3)`, everything else) — the server-rendered Thymeleaf/HTMX
-  UI. Public: `/`, `/search/**`, `/login`, `/error`, static assets, `/actuator/health`,
-  `/actuator/info`, `/v3/api-docs/**`, `/swagger-ui/**`, `/swagger-ui.html`. Protected:
-  `/admin/**`, `/config/**`, and anything else, via Spring Security form login
-  (`loginPage("/login")`, `defaultSuccessUrl("/admin", true)`) and Spring Session JDBC.
-- **`DevH2ConsoleSecurityConfig`** (`@Order(1)`, `@Profile("dev")`) — a third chain, matching only
-  `/h2-console/**`, permitting all access and relaxing CSRF/frame-options so the console (which
-  renders in an iframe) works. Never active outside the dev profile.
+- `/api/projects/**` → `authenticated()`, via HTTP Basic (`httpBasic(Customizer.withDefaults())`).
+- Everything else — `/api/search/**`, static SPA assets, and the client-routed SPA paths
+  `SpaController` forwards (`/`, `/login`, `/admin/**`) — → `permitAll()`.
+- `SessionCreationPolicy.STATELESS`, CSRF disabled throughout (nothing here relies on a cookie the
+  browser attaches automatically, so CSRF protection doesn't apply to any of it).
 
-Both the API and app chains share one in-memory `UserDetailsService` (`SecurityConfig`), built from
-`AdminProperties` (`loguty.admin.username`/`.password`, env vars `LOGUTY_ADMIN_USERNAME`/
-`LOGUTY_ADMIN_PASSWORD` in prod), BCrypt-encoded once at startup. `SecurityConfig` throws
-`IllegalStateException` at bean-creation time if either is blank — a production instance can
-never come up with an unauthenticated or blank admin account.
+**`DevH2ConsoleSecurityConfig`** (`@Order(1)`, `@Profile("dev")`) is unchanged: a separate,
+higher-priority chain matching only `/h2-console/**`, permitting all access and relaxing
+CSRF/frame-options so the console (which renders in an iframe) works. Never active outside the dev
+profile.
+
+The real access-control boundary is entirely at the API layer now: `/admin/**` page loads succeed
+for anyone (they just render the SPA shell), but every write — and every read of a project's full
+configuration — still requires a valid `Authorization: Basic` header on the actual `/api/projects/**`
+call. The frontend's own route guard (`frontend/src/routes/_shell.admin.tsx`'s `beforeLoad`,
+checking whether credentials are in `sessionStorage`) is a UX nicety — it stops an unauthenticated
+visitor from *seeing* the admin pages flash before a 401 would occur, it isn't the security
+boundary itself.
+
+The one in-memory `UserDetailsService` (`SecurityConfig`), built from `AdminProperties`
+(`loguty.admin.username`/`.password`, env vars `LOGUTY_ADMIN_USERNAME`/`LOGUTY_ADMIN_PASSWORD` in
+prod), BCrypt-encoded once at startup, throws `IllegalStateException` at bean-creation time if
+either is blank — a production instance can never come up with an unauthenticated or blank admin
+account. This is also, indirectly, what the frontend's login page authenticates against — see §10:
+there's no separate JSON login endpoint, signing in *is* a successful `GET /api/projects` call with
+a freshly-built Basic header.
 
 **CORS**: off by default. `CorsConfig` registers a `CorsConfigurationSource` for `/api/**` only,
-driven by the (empty-by-default) property `loguty.api.cors.allowed-origins` (comma-separated). No
-browser-based external UI can call the API cross-origin until an admin explicitly configures it.
+driven by the (empty-by-default) property `loguty.api.cors.allowed-origins` (comma-separated). The
+bundled SPA never needs this (same-origin); it's there for any other external API consumer.
 
 **OpenAPI**: `OpenApiConfig` declares one global `basicAuth` security scheme so Swagger UI's "Try it
 out" can authenticate against `/api/projects/**`; `/api/search/**` endpoints are annotated
@@ -214,121 +243,28 @@ out" can authenticate against `/api/projects/**`; `/api/search/**` endpoints are
 
 ## 7. Request flows
 
-### 7.1 Public search page (`GET /`, `GET /search`)
+### 7.1 Frontend routes → REST API
 
-Handled by `controller.search.SearchController`.
+There's no server-side rendering left to walk through step by step — every `frontend/src/routes/*`
+page is a plain React component that calls the REST API in §7.2 via `frontend/src/lib/api.ts`. See
+§10 for the frontend's own architecture (routing, auth, the wizard, the search page's client-side
+behavior); the short version, route by route:
 
-1. `GET /` (`index`) reads the active-project cookie `LOGUTY_ACTIVE_PROJECT`
-   (`ProjectAdminController.ACTIVE_PROJECT_COOKIE` — shared constant, not tied to any login
-   session since searching is public), loads all projects (`ProjectService.listProjects()`) for
-   the picker `<select>`, and if a valid active project is set, loads its public view
-   (`ProjectService.findPublicView` → `PublicProjectView`, containing just `id`, `name`, and its
-   `FilterField`s as `PublicFilterFieldView(key, label)` — **never the raw JPA entity**). Renders
-   `search.html` with `defaultFrom`/`defaultTo` (now − 1 day .. now) pre-filled into the date
-   inputs.
-2. Changing the project `<select>` submits a plain `GET /search/select-project?projectId=...`
-   (`selectProject`), which just rewrites the cookie and redirects to `/` — not HTMX, a full
-   navigation, since switching projects is infrequent.
-3. Submitting the search form is HTMX (`hx-get="/search" hx-target="#results"`), hitting
-   `SearchController.search`: reads the active-project cookie (the `projectId` hidden field in the
-   form is *not* read by this endpoint — it exists only so client-side `downloadResults()` can read
-   it via `FormData` for the export link, which unlike `/search` needs an explicit `projectId`
-   parameter), collects every `filter_<key>` request parameter into a `Map<String,String>`, builds
-   a `SearchRequest`, and calls `SearchService.search(...)`. Returns just the
-   `search :: resultsFragment` fragment (paginated, `PAGE_SIZE = 50`, page-based, batch — **not**
-   the SSE endpoint; see §7.4 for why the streaming API exists separately).
-4. Errors (`IllegalArgumentException` from a bad date range, or `SearchOverloadedException` from
-   the global concurrency cap) are caught and rendered as an inline banner in the same fragment,
-   never a 500 page.
+| Route | Backend calls |
+|---|---|
+| `/` (search) | `GET /api/search/projects` (picker), `GET /api/search/projects/{id}` (fields), then `POST /api/search` (batch/paginated) or `GET /api/search/stream` (live, via `EventSource`) per search; `GET /api/search/export` is a plain download link |
+| `/login` | `GET /api/projects` with a freshly-built `Authorization: Basic` header — success *is* the login, there's no dedicated login endpoint |
+| `/admin` | `GET /api/projects` (HTTP Basic) for the dashboard totals |
+| `/admin/projects` | `GET /api/projects` (list), `DELETE /api/projects/{id}` |
+| `/admin/projects/new`, `/admin/projects/$id/edit` | `GET /api/projects/{id}` (edit prefill only), `POST /api/projects/sample-line/analyze`, `POST /api/projects/path-check` per wizard step, `POST /api/projects` or `PUT /api/projects/{id}` on save |
+| `/admin/projects/upload` | `POST /api/projects/logback/parse` (multipart), then hands the parsed result to the `new` route in-memory (`frontend/src/features/wizard/wizardPrefill.ts`) |
 
-Everything below the HTMX-swapped fragment (view mode, group-by, panel-collapse) is pure
-client-side JS in `search.html` — see §10.
+`ProjectApiController`'s create/update endpoints are exactly what used to be called "a one-shot
+equivalent of the wizard flow" back when there was a separate session-backed multi-step server
+flow — now they're just *the* wizard's backend, full stop: one complete `ProjectRequest` payload,
+validated with `ProjectWizardValidation`, persisted with `ProjectService.saveFromWizard`.
 
-### 7.2 Admin login (`GET /login`, form POST `/login`, `/logout`)
-
-`controller.web.LoginController` just renders `login.html`; the actual authentication is Spring
-Security's built-in `formLogin` processing filter (configured in `appSecurityFilterChain`, not a
-custom controller). `login.html` shows `?error`/`?logout` query-param banners. Successful login
-redirects to `/admin` (`AdminController.index`, which just reads the `Authentication` principal
-name into the model — this endpoint's only job is to prove the chain requires auth).
-
-### 7.3 Admin project list (`GET/POST /admin/projects/**` via `ProjectAdminController`)
-
-- `GET /admin/projects` (`list`) — reads the same active-project cookie, lists all projects
-  (`ProjectSummaryDto`), renders `admin/projects/list.html`.
-- `POST /admin/projects/{id}/activate` — sets the cookie (30-day `Max-Age`), returns just the
-  `projectList` fragment (HTMX `outerHTML` swap) so the "active" badge updates without a reload.
-- `POST /admin/projects/{id}/delete` — deletes via `ProjectService.deleteProject` (cascades to
-  `LogSource`/`LogFile`/`FilterField`/`LinePattern` via `orphanRemoval`); if the deleted project was
-  the active one, expires the cookie (`Max-Age=0`) so the public search page doesn't keep pointing
-  at a project that no longer exists.
-
-### 7.4 Admin project wizard (`ProjectWizardController`, session-backed HTMX flow)
-
-Steps, in order (`response.project.WizardStep`): **DETAILS → NODES → SAMPLE_LINE → FIELDS →
-REVIEW**. A single `ProjectWizardForm` draft lives in the `HttpSession` under key
-`"projectWizardDraft"` for the whole flow.
-
-**Entry points** (all seed a fresh draft and land on `DETAILS`, since only the admin can supply the
-project name):
-- `GET /admin/projects/new` — blank draft, one empty `NodeForm` (itself pre-seeded with one empty
-  `LogFileForm`) and one empty `FilterFieldForm`, so the first render already shows one row of each.
-- `GET /admin/projects/{id}/edit` — `ProjectService.loadForEdit(id)` rebuilds a `ProjectWizardForm`
-  from the persisted `Project` graph (including each node's `LogFile`s and their
-  `logFileId`/`lastCheckStatus`/`lastCheckMessage`, so previously-recorded path checks still show).
-  Guarantees at least one blank node/output/field row exists so the templates always have
-  something to render an "add" affordance against.
-- `GET /admin/projects/upload` → `POST /admin/projects/upload` (multipart) — parses the uploaded
-  XML via `LogbackXmlParser.parse` (§9.5), seeds a fresh draft with one node whose first `LogFile`
-  gets the derived `backupPathPattern`, and one `FilterFieldForm` per detected MDC key
-  (`MatchType.EXACT_TOKEN` by default). `uploadLiveLogHint`/`uploadBackupRootHint` carry the raw
-  detected live-file path and backup-root prefix as **informational-only** text shown on the Nodes
-  step — never bound into the real path fields, since those must be the *real*, per-node
-  filesystem paths the admin supplies, not whatever the XML happened to say.
-
-**Every step POST** follows the same shape: bind the step's own fields into a fresh
-`@ModelAttribute ProjectWizardForm submitted`, merge just the relevant part into the session draft,
-call the private `step(...)` helper (which **re-sets** the session attribute — see the gotcha in
-§11), and return the `admin/projects/steps :: stepBody` fragment for HTMX to swap into
-`#wizard-body`.
-
-- **DETAILS** (`/wizard/details`) — validates non-blank name + not-a-duplicate
-  (`ProjectWizardValidation.validateDetails` + `ProjectService.nameExists`), advances to NODES.
-- **NODES** (`/wizard/nodes*`) — nodes are now *nested*: each `NodeForm` holds a
-  `List<LogFileForm>`. Separate add/remove endpoints exist at both levels:
-  `/wizard/nodes/add|remove` (whole node) and
-  `/wizard/nodes/{nodeIndex}/outputs/add|remove` (one log output within a node). The **"Test
-  paths"** button (`POST /wizard/nodes/test-path`, not a step-advancing endpoint) reads the live
-  DOM values of a specific row's live/backup path inputs via `document.getElementById(...)` (their
-  real `name` is an indexed list-binding path like `nodes[0].logFiles[0].liveLogPath`, not a plain
-  `path`, so HTMX's `hx-vals="js:{...}"` reads them by id instead), checks both paths together
-  (`ProjectService.checkPaths`), and — if the row corresponds to an already-persisted `LogFile`
-  (`logFileId` present) — records the combined result onto that row immediately, even before the
-  wizard is saved. Returns just the `path-badge :: badge` fragment for that row. Advancing
-  (`/wizard/nodes`) requires at least one node with a non-blank label
-  (`ProjectWizardValidation.validateNodes`).
-- **SAMPLE_LINE** (`/wizard/sample-line*`) — optional step. `/wizard/sample-line/analyze` re-runs
-  `SampleLineAnalyzer.analyze` against whatever sample line is currently in the textarea and
-  overwrites the suggested timestamp/level/logger pattern fields with fresh guesses, staying on the
-  same step so the admin can review the highlighted preview (color-coded segments: yellow =
-  timestamp, green = level, blue = logger) before confirming or hand-editing. Never fails — an
-  unparseable or blank line just yields an "nothing detected" result.
-- **FIELDS** (`/wizard/fields*`) — add/remove filter-field rows; advancing validates that any
-  partially-filled row has both a key and a label (`ProjectWizardValidation.validateFields`) —
-  fields are optional overall, but not half-filled.
-- **REVIEW** (`/wizard/review/back`, `/wizard/save`) — read-only summary of the whole draft.
-  `POST /wizard/save` re-validates details + nodes (defense in depth — the client can't be trusted
-  to have gone through every step honestly), persists via
-  `ProjectService.saveFromWizard(draft)`, clears the session draft, and responds with an
-  `HX-Redirect: /admin/projects` header (HTMX performs the client-side redirect; the fragment body
-  itself — `steps :: saved` — is never actually shown).
-
-`ProjectApiController`'s create/update endpoints (§7.5) are a one-shot equivalent of this entire
-flow — one complete `ProjectRequest` payload validated with the same `ProjectWizardValidation` and
-persisted with the same `ProjectService.saveFromWizard`, just without the session/multi-step
-machinery.
-
-### 7.5 REST API (`/api/**`)
+### 7.2 REST API (`/api/**`)
 
 | Controller | Method + path | Auth | Behavior |
 |---|---|---|---|
@@ -352,13 +288,10 @@ manually", per its own comment) so they can never structurally collide with a sa
 action route (e.g. `GET /api/projects/path-check` would otherwise 200 with `id="path-check"`
 instead of correctly 405-ing).
 
-**Important, non-obvious fact:** the built-in Thymeleaf search page does **not** use the SSE
-`/api/search/stream` endpoint for its results — it still uses the classic paginated,
-batch `SearchController.search` → `SearchService.search()` path (§7.1). The SSE endpoint exists as
-a public API feature for *external* consumers who want progressive results, and the plain-text
-`/export` endpoint (same streaming code path) is the one piece of it the built-in UI actually calls
-(the "Download all matches" link). If a future task wires the main UI to consume `/stream`
-directly, update this note.
+The React search page uses **both** consumption modes, unlike the old Thymeleaf page (which only
+ever called the batch path): the default view calls batch `POST /api/search` (paginated), and its
+"Live" toggle switches to `GET /api/search/stream` via a native `EventSource` (see §10.3). The
+plain-text `/export` endpoint backs the Export link either way.
 
 `ApiExceptionHandler` (`controller.common`, `@RestControllerAdvice(assignableTypes = {
 SearchApiController.class, SearchStreamController.class, ProjectApiController.class })`) is the
@@ -376,8 +309,9 @@ before a handler method is even invoked instead falls through to Spring Boot's d
 handling, whose JSON body doesn't match `ApiError`'s shape. **`ApiErrorAttributes`**
 (`controller.common`, extends `DefaultErrorAttributes`) exists specifically to catch that gap: it
 reshapes only `/api/**`-prefixed error responses into the same `ApiError` field set (and, like
-`ApiExceptionHandler`, never leaks a raw exception message for a 5xx), leaving the Thymeleaf UI's
-own `/error` rendering untouched.
+`ApiExceptionHandler`, never leaks a raw exception message for a 5xx), leaving Boot's default
+`/error` handling untouched for everything else (the SPA's own routes never hit it in practice,
+since `SpaController` forwards them to `index.html` before any error path would).
 
 ## 8. The search engine pipeline (`service.search` — the architectural core)
 
@@ -543,166 +477,124 @@ never legitimately needs a DTD). Extracts:
 
 Throws `LogbackParseException` for an empty upload, unparseable XML, or an unreadable file.
 
-## 10. Frontend architecture
+## 10. Frontend architecture (`frontend/`)
 
-### 10.1 Shared `<head>` fragment and display preferences
+A React 19 SPA: TanStack Router (client-only — no server rendering, no TanStack Start/Nitro, even
+though the design it was ported from used them, see the note at the end of this section) for
+file-based routing, TanStack Query for server-state caching, shadcn/Radix for components, Tailwind
+v4 for styling, Vite for the build. `frontend/src/main.tsx` is the entry point:
+`createRouter()` + `<QueryClientProvider><AuthProvider><RouterProvider .../></AuthProvider></QueryClientProvider>`.
 
-[`fragments/head.html`](../src/main/resources/templates/fragments/head.html) is `th:replace`d into
-every page's `<head>`. It wires up the Tailwind/HTMX/Alpine CDN scripts, the CSRF meta-tags plus an
-`htmx:configRequest` listener that auto-attaches the CSRF header to every HTMX request, and **four
-independent, purely client-side (localStorage-only, never a cookie or server round trip) display
-preferences**, each applied *pre-paint* via a synchronous IIFE so there's never a flash of the
-wrong state:
+### 10.1 Routing
 
-| Preference | Storage key | States | Applied as |
-|---|---|---|---|
-| Theme | `theme` | light (default) / dark | `html.dark` class |
-| Density | `density` | comfortable (default) / compact | `html.compact` class |
-| Skin | `skin` | `console` (default) / `signal` / `default` | `data-skin` attribute |
-| Console font | `consoleFont` | `jetbrains` (default) / `system` | `data-console-font` attribute (Console skin only) |
+File-based, under `frontend/src/routes/`: dot-separated filename segments nest the same way
+directories would (`_shell.admin.projects.new.tsx` → `/admin/projects/new`).
+`@tanstack/router-plugin`'s Vite plugin generates `frontend/src/routeTree.gen.ts` from this
+directory at build/dev time — it's gitignored, never hand-edited.
 
-Every skin defines its own light *and* dark set of CSS custom properties (`--lvl-error-fg`,
-`--tag-bg`, `--banner-*-bg`, plus skin-specific ones like `--console-accent`/`--signal-line`);
-shared component rules (log-level pills, chips, banners, the stream/group-by views) are written
-**once** and colored entirely through those tokens — adding a new skin means defining a token set
-plus whatever structural CSS it wants, never duplicating every component rule. "Default" reproduces
-today's original fixed Tailwind red/amber/blue/slate palette so it looks identical whether or not a
-skin has ever been chosen.
+- `__root.tsx` — just `<Outlet/>` plus the 404/error boundary components. No document shell here
+  (that moved to `frontend/index.html` since there's no SSR anymore — see the note below).
+- `_shell.tsx` — wraps every route in `AppShell` (sidebar + `TopBar`).
+- `_shell.admin.tsx` — parent of every `/admin/*` route; its `beforeLoad` is the **only** place the
+  client-side "you must be signed in" redirect lives (`redirect({ to: "/login" })` if
+  `getStoredAuth()` is empty). See §6 for why this is UX, not the real security boundary.
+- `_shell.index.tsx` (`/`), `login.tsx` (`/login`) sit outside the admin guard — both public.
+- `_shell.admin.projects.$id.edit.tsx` — the one route that didn't exist in the original design
+  reference; added because the real backend needs an edit flow the mock never had (see §10.4).
 
-Every HTMX-swapped region gets the same fade/slide-in entrance animation
-(`htmx:afterSwap` → `.fade-in-up` class, removed on `animationend`) with zero per-template wiring.
+### 10.2 Shared infrastructure (`frontend/src/lib/`)
 
-### 10.2 The search page (`search.html`) — client-side behavior
+- **`api.ts`** — the single fetch wrapper (`request<T>`) everything else calls through. Attaches
+  the stored `Authorization: Basic` header only when the path starts with `/api/projects`; on any
+  non-2xx response, parses the body as the backend's `ApiError` shape and throws an
+  `ApiRequestError`; on a `401` from a `/api/projects/**` call, clears stored auth and hard-redirects
+  to `/login`. Typed endpoint functions (`searchApi.*`, `projectApi.*`) live here too, built on top
+  of `request`.
+- **`auth.tsx`** (`AuthProvider`/`useAuth`) + **`authStorage.ts`** — there is **no separate JSON
+  login endpoint**. `/api/projects/**` is already stateless HTTP Basic (§6), so the login page just
+  builds `Authorization: Basic base64(user:pass)` and calls `GET /api/projects` with it directly —
+  a `200` *is* a successful login. The header is then kept in `sessionStorage` (cleared on sign-out,
+  a `401`, or the tab closing) and reused by `api.ts` for every subsequent admin call.
+  `// ponytail:` comment on `authStorage.ts` marks this explicitly as the deliberate simplification
+  it is (credentials in `sessionStorage`, fine for a single-admin internal tool; upgrade path is a
+  short-lived server-issued token if this ever needs to be exposed beyond a trusted admin).
+- **`activeProject.ts`** + **`useActiveProject.ts`** — the SPA's own client-side "active project"
+  (`localStorage` key `loguty.activeProjectId`), since the public search API has no server-side
+  concept of one (`projectId` is a required field/param on every `/api/search/**` call — see §7.2).
+  Sourced from the public `GET /api/search/projects` list (no auth needed), shared by the search
+  page's picker and the `TopBar` switcher — there's deliberately only one project switcher control
+  in the whole UI, not a separate one per page.
+- **`projectStatus.ts`** — the admin dashboard/list pages show a healthy/degraded/silent status
+  dot per project, derived from real data: `GET /api/projects` (the summary list) doesn't carry
+  per-log-file check results, so `useProjectStatuses(ids)` fires one `GET /api/projects/{id}` per
+  visible project in parallel (via `useQueries`) and derives status from
+  `LogFileResponse.lastCheckStatus` (any `UNREACHABLE` → degraded, none configured → silent, else
+  healthy). N+1 by construction — accepted because this is a small internal admin tool, not a
+  public dashboard; don't scale this pattern up to hundreds of projects without adding a real
+  aggregate endpoint instead.
 
-The server renders one HTMX fragment (`resultsFragment`) per search/page-change; **everything else
-— view mode, grouping, highlighting, quick filters, filter chips, stats, panel collapse — is
-rebuilt entirely client-side** in a `<script>` block, because the controller (`SearchController`)
-doesn't echo request parameters back into the model.
+### 10.3 The search page (`frontend/src/features/search/SearchScreen.tsx`)
 
-- **`onResultsSwapped()`** is the single entry point, called on `htmx:afterSettle` (not
-  `afterSwap` — instrumentation showed htmx's own settle step reverts class changes made during
-  `afterSwap` within ~50ms, silently undoing view-mode hide/show; `afterSettle` fires after
-  settling completes, so it's the last word). It calls, in order: `processLogCards()`,
-  `renderStatsStrip()`, `renderFilterChips()`, `captureEntries()`, `refreshDerivedView()`.
-- **`processLogCards()`** does two related things per `#cards-view .log-card`, in one pass over
-  each card's `.log-line-text`, because both need the same leading-timestamp match:
-  - **Local time.** `LogLine.timestamp()` is a wall-clock `LocalDateTime` with no zone attached
-    (see §7 / `DefaultLogLineParser` — it parses the digits but deliberately discards any
-    offset/zone the line prints, since date-range search compares wall-clock values). The server
-    renders that value, **including milliseconds** (`yyyy-MM-dd'T'HH:mm:ss.SSS` — precision the
-    conversion below needs and must not drop), pre-formatted for a no-JS fallback, and also
-    verbatim as `data-ts-raw` on `.log-timestamp`. The raw digits are **always treated as UTC**
-    (`new Date(dataTsRaw + 'Z')`, converted to the browser's local time and re-formatted with
-    `formatLocalTimestamp()`, which also carries milliseconds through) — including on a line that
-    prints its own zone/offset suffix (`+0530`, `Z`, …). That printed offset is deliberately
-    ignored for the conversion itself: an earlier version honored it when present, but real
-    projects turned up log lines whose offset suffix doesn't actually describe the zone the digits
-    were written in (a static/misconfigured `%z`-style token), so trusting it selectively produced
-    *worse* results (silently no-op'd conversions) than uniformly assuming UTC. `LEADING_TIMESTAMP_RE`
-    still matches that trailing zone/offset (captured in group 1) — its only remaining use is
-    finding how much text to strip for the dedup step below; group 1 is not read for the time math.
-    The offset text itself is never displayed anywhere (an earlier version surfaced it in a `title`
-    tooltip — removed per product feedback: it read as a confusing "why is there a stray +0530
-    here" artifact, not a helpful reference).
-  - **Prefix dedup.** `LogLine.raw()` is the full original line, which already starts with the same
-    timestamp/level text the badges render separately, so left unmodified every card duplicated its
-    own date and level. This strips the matched leading timestamp (+ offset, if any) from the first
-    physical line, then separately removes this card's own extracted level *value* (read from the
-    `.log-level` badge text, not a hardcoded keyword list — a project can configure any vocabulary)
-    wherever it first appears on that first line, mirroring `DefaultLogLineParser.level()`'s own
-    first-match-anywhere search so it removes exactly the substring that produced the badge. Only
-    ever touches the **first** line of a (possibly multi-line, stack-trace-bearing) entry — a
-    continuation line is never scanned for a level word, matching `LogEntryAssembler`, which also
-    only ever calls `parser.level(...)` on an entry's first line. Only applied when this card
-    actually has a parsed timestamp (`data-ts-raw` present) / level (badge text isn't `'—'`) to
-    match against — a line the backend couldn't parse is left completely untouched. Best-effort by
-    construction: a project with a custom, non-standard `timestampPattern` (e.g. `dd/MM/yyyy`) simply
-    won't match `LEADING_TIMESTAMP_RE` and keeps showing its full raw prefix — same class of
-    limitation already documented for `highlightResults()`'s `REGEX`-field best-effort matching.
-- **`captureEntries()`** snapshots the server-rendered `#cards-view .log-card` elements into a
-  plain-JS array `currentEntries` (`cardEl`, `level`, `node`, `file`, `timestamp`, `raw`) — the
-  single canonical source every other client-side feature reads from. `timestamp`/`raw` are read
-  *after* `processLogCards()` has already localized/deduped the DOM text.
-- **View mode** (`currentViewMode()`/`setViewMode()`, `localStorage['viewMode']`, default
-  `"stream"`): Cards (the server-rendered `#cards-view`) vs. Stream (`#stream-view`, entirely
-  client-built by `buildStreamRow()` — a dense, ellipsis-truncated single-line-per-entry layout
-  with an expand toggle for multi-line/long entries). The expand toggle is always the row's
-  *first* child, in a fixed-width `.log-row-toggle-slot` gutter (empty/reserved even on rows with
-  nothing to expand, so every row's timestamp still lines up at the same x position) — not the
-  last child. On a narrow viewport, or with long node/file labels, the row's fixed-width badges can
-  collectively overflow it even though `.log-line-text` itself shrinks/ellipsizes correctly
-  (`flex:1; min-width:0`); since horizontal scroll always starts at the row's beginning, a toggle
-  parked at the *end* of an overflowing row scrolls out of reach and becomes unclickable without
-  scrolling right first — this is why it lives at the start instead.
-- **Group by** (`applyGrouping()`): clusters `currentEntries` under a heading per distinct value of
-  a chosen filter-field key, extracted from the raw line via a regex built from
-  `key\s*[=:]\s*([^\s,)&\]]+)`; entries where the key can't be extracted land in a trailing
-  "Ungrouped" section. Always rebuilt from the untouched `currentEntries` snapshot, so switching
-  back to "None" is just "don't group" on the next pass, never an undo.
-- **Highlighting** (`highlightResults()`): wraps every occurrence of any non-blank search-form
-  input value (free text + every `filter_*` field, longest-first so overlaps prefer the longest
-  match) in `<mark>`, across whichever view is currently visible. Best-effort only for `REGEX`
-  fields, since the public page has no visibility into a field's `MatchType`.
-- **Stats strip + quick filters** (`renderStatsStrip()`/`applyQuickFilters()`): counts by
-  level/node/file **among the entries on this page only** (not the full, possibly-truncated match
-  set), rendered as clickable pills; clicking toggles a pill `.active` and re-filters
-  `currentEntries` by show/hide by `style.display` — pills within one category OR together,
-  categories AND together.
-- **Filter chips** (`renderFilterChips()`): dismissible summary pills read straight from the live
-  form inputs; clicking a chip's `×` clears that one input and re-triggers the form's own
-  `hx-get` via `htmx.trigger(form, 'submit')`.
-- **Download all matches** (`downloadResults()`): navigates to `/api/search/export` with the
-  current form's `FormData` as query params — this is the one place the SSE-adjacent streaming API
-  is actually used by the built-in UI (see §7.5's note).
-- **Panel collapse** (`toggleSearchPanel()`, `localStorage['searchPanelCollapsed']`): hides/shows
-  the project-picker + search-form chrome once results are showing, independent of any search.
-- **`#search-panel` layout**: the project-picker and `#search-form` are two separate `<form>`s (the
-  picker is a plain GET navigation on `<select>` change; `#search-form` is the htmx-driven one) but
-  render as a single visual row — each form is `class="contents"` (`display: contents`), so its
-  children become direct flex items of the shared `.search-toolbar` wrapper around both, which
-  wraps (`flex-wrap`) rather than stacking every field on its own labeled line the way it used to.
-  Because `display: contents` boxes can't take a background/border themselves, the skins' card
-  styling (`html[data-skin=...] .search-toolbar` in head.html) targets that outer wrapper, not
-  `#search-form` — don't reintroduce a `.project-picker`/`#search-form` background selector pair,
-  it would silently no-op on the now-boxless forms.
-- Pagination: Prev/Next buttons are `hx-get="/search" hx-include="#search-form"` with
-  `hx-vals="js:{page: ...}"`; the page-jump input calls `htmx.ajax(...)` directly with a merged
-  `FormData` + explicit page.
+- **Two result modes**, both real backend calls: batch (`POST /api/search`, paginated,
+  `PAGE_SIZE = 50`) is the default; a "Live" switch reroutes the same Run action to
+  `GET /api/search/stream` via a native `EventSource` (no SSE client library — the endpoint is a
+  plain public GET with no custom headers needed), accumulating `chunk` events into state,
+  showing `progress` events while running, and finalizing on `done`. Export is a plain
+  `<a href="/api/search/export?...">` link, not a fetch/blob download, since the backend already
+  sets `Content-Disposition: attachment`.
+- **Timestamp handling** (`features/search/logLine.ts`) ports the old Thymeleaf page's exact
+  behavior: `LogLine.timestamp` is a wall-clock `LocalDateTime` with no zone (`DefaultLogLineParser`
+  parses the digits but discards any printed offset), always treated as UTC and converted to the
+  viewer's local time (`new Date(iso + "Z")`) regardless of what offset the raw line prints after
+  it — real projects have shown a misconfigured/static offset suffix that doesn't describe the zone
+  the digits were actually written in, so honoring it selectively produced worse results than
+  uniformly assuming UTC. `summaryLine()` strips that same leading timestamp + the entry's own
+  level token from the collapsed card's preview line (mirrors `DefaultLogLineParser.level()`'s
+  first-match-anywhere search) — the full `raw` text is always still shown in full once a card is
+  expanded.
+- **Level filtering is client-side only** (`levelBucket()`/`enabledLevels`) — `SearchRequest` has
+  no server-side level parameter; toggling a level chip filters whatever's already been fetched,
+  same as `MatchType`-driven field filters are the closest thing to a server concept of it.
+  "Quick range" pills (5m/15m/1h/...) are pure client-side convenience that compute and fill in
+  explicit `from`/`to` values — there's no relative-range concept on the backend, `SearchRequest`
+  only ever takes absolute timestamps.
+- **No separate Cards/Stream view-mode toggle or group-by** (both real features of the old
+  Thymeleaf page) — the current design has one card-list layout; density (comfortable/compact,
+  `localStorage` key `loguty.density`) is the only layout lever ported over. Add view-mode/group-by
+  back as new features if a future task asks for them; they weren't dropped for a technical reason,
+  just out of scope for the initial port.
 
-### 10.3 The admin wizard's frontend
+### 10.4 The admin wizard (`frontend/src/features/wizard/`)
 
-Each wizard step is a plain HTML `<form>` whose buttons are individually `hx-post`-wired (not a
-single form-level submit) so "Add node"/"Remove"/"Test paths"/"Analyze"/"Back"/"Next" can each hit
-a different endpoint while still submitting the whole form's current field values
-(`hx-include="closest form"`). The step template itself is chosen server-side
-(`admin/projects/steps.html`'s `th:switch` on `currentStep.name()`) — see the Thymeleaf gotcha in
-§11. The "Test paths" button reads live (unsaved) path input values by DOM id since their `name`
-attributes are indexed list-binding paths, not plain field names (§7.4).
+`ProjectWizard.tsx` renders 6 steps (details → nodes → sample line → line pattern → fields →
+review) driven by local React state (`types.ts`'s `WizardState`), reused by both
+`/admin/projects/new` (`mode="create"`) and `/admin/projects/$id/edit` (`mode="edit"`, prefilled
+via `wizardStateFromDetail(ProjectDetailResponse)`). `wizardStateToRequest()` converts back to a
+`ProjectRequest` for the final `POST`/`PUT`. Nodes are nested exactly like the backend model — each
+node holds a list of log files, added/removed independently at both levels (`steps/NodesStep.tsx`);
+its "Test paths" button calls the real `POST /api/projects/path-check`, not a placeholder. A "line
+pattern" step exists as its own step (prefilled from the sample-line step's `analyze` call) since
+`LinePatternRequest` is real, required data the original design reference never asked for at all.
+The upload page (`_shell.admin.projects.upload.tsx`) hands its parsed `LogbackParseResult` to the
+`new` route through an in-memory handoff (`wizardPrefill.ts` — a module-level variable, since it's
+always the same same-tab SPA navigation, nothing needs to survive a reload) instead of a session
+draft.
+
+### 10.5 Converting away from TanStack Start / SSR
+
+The design this frontend's look was ported from (a Lovable-generated prototype) ran on TanStack
+**Start** with a Nitro SSR server, defaulting to a Cloudflare build target — a second Node runtime
+this app would have had to run alongside Spring Boot in production, breaking "standalone Spring
+Boot app." It was converted to a plain client-rendered SPA instead: dropped
+`@tanstack/react-start`, `nitro`, and the Lovable-platform-specific dev/error-reporting glue;
+kept `@tanstack/react-router` (file-based routing works identically without Start) and everything
+else. `frontend/index.html` + `src/main.tsx` (standard Vite React entry) replaced `__root.tsx`'s
+`shellComponent`/`HeadContent`/`Scripts` SSR document — the pre-paint theme/skin `localStorage` IIFE
+moved into `index.html`'s `<head>` verbatim, same flash-of-wrong-theme fix as before. Per-route
+`head()` SEO/OG-tag metadata (SSR-oriented, irrelevant for an internal admin tool) was dropped, not
+ported.
 
 ## 11. Known gotchas — read before touching these areas
-
-**Spring Session only persists attributes you explicitly re-`setAttribute`.** Mutating an object
-retrieved via `session.getAttribute(...)` in place does **not** get written back to the JDBC
-session store — the next request reloads the stale, unmutated version from the DB. This is why
-`ProjectWizardController`'s private `step(...)` helper always calls
-`session.setAttribute(DRAFT_KEY, draft)` before returning, even though `draft` was already mutated
-by reference. **If you add a new session-backed mutable flow, follow this pattern.** MockMvc built
-with `webAppContextSetup(...).apply(springSecurity())` does *not* run the real session filter, so
-it holds the same object reference across "requests" and will pass even if this bug is present —
-verify session-backed flows with real `curl` + a cookie jar, not just MockMvc.
-
-**Thymeleaf: never put `th:insert`/`th:replace` on the same tag as `th:switch`/`th:case`/`th:if`/
-`th:with`.** Fragment-inclusion attributes have higher processing precedence, so they execute
-*before* the conditional gets a chance to prune non-matching branches — every branch's fragment
-gets inserted unconditionally. This produced a real bug in `steps.html`'s step switch (every wizard
-step rendered *all* steps' forms stacked together). Fix, already applied and must be preserved:
-always nest — conditional on an outer tag, `th:replace` on an inner child:
-```html
-<div th:case="'X'"><div th:replace="~{... :: frag}"></div></div>
-```
-When testing a step/state-branching fragment, assert the *absence* of sibling branches' content,
-not just the presence of the expected content — a plain `containsString` won't catch this class of
-bug (the real content is genuinely there, just with extra content alongside it).
 
 **`DateTimeFormatter.parseUnresolved` needs a `YEAR_OF_ERA` fallback.** See §9.3.
 
@@ -712,31 +604,25 @@ itself. See §2.1.
 **Boot 4's modularized auto-config bites silently.** See §2.1 — no exception, no warning, the
 integration just doesn't activate.
 
-**The global `.hidden { display: none !important; }` rule (head.html) beats Tailwind's `dark:`/
-state variants on the same element.** `!important` always wins over a plain-specificity utility
-like `dark:block`, regardless of source order — so an element that starts `class="hidden ... 
-dark:block"` (base-hidden, shown only in one state) stays hidden forever, since `dark:block`'s
-`display:block` can never outrank it. This is exactly what made the theme toggle's moon icon
-invisible in dark mode (light *and* dark icon both hidden, empty-looking button). Fix pattern:
-give the state-only icon/element its own dedicated class instead of literal `hidden`, e.g.
-`.theme-icon-moon { display: none; } html.dark .theme-icon-moon { display: block; }` (mirrors the
-pre-existing `.density-icon-compact` pattern). `.hidden` itself must stay `!important` — it's relied
-on elsewhere (`toggleSearchPanel()`, `#quick-filter-empty`, `#stream-view`) to reliably win over
-whatever other classes an element happens to carry.
+**`SpaController`'s route list must stay in sync with the frontend's real routes.** It forwards
+exactly `/`, `/login`, and `/admin/**` to `index.html` (§4, §6) — an explicit list, not a
+catch-all regex, because the backend needs to know which paths are SPA client routes (forward to
+the shell) versus real static assets (404 if actually missing) versus `/api/**`/actuator/swagger
+(their own handlers). Adding a new *top-level* frontend route outside `/admin/**` means adding it
+to this list too, or a direct browser load/refresh of that route will 404 instead of resolving via
+the client-side router.
 
-**MockMvc's `webAppContextSetup` doesn't run the real Spring Session filter chain** — see the
-session-mutation gotcha above; this is why the original build's verification discipline (below)
-mattered.
+**The `frontend-maven-plugin`'s Node download has been observed to fail intermittently on at least
+one Windows dev machine** (antivirus real-time scanning intercepting the freshly-extracted
+`node.exe`, or a corrupted npm cache download manifesting as `ENOTEMPTY`/"tarball data ... seems to
+be corrupted" warnings) — always transient so far; deleting `frontend/node` (and, if `npm`-level
+errors show up, `frontend/node_modules` + `frontend/package-lock.json`) and re-running the build
+has resolved it every time. See §3.
 
-### Verification discipline this codebase was built with
-
-Every phase of this build was verified by (1) unit/integration tests **and** (2) booting the real
-app and driving it with `curl` (login flow, wizard steps, multipart upload, search queries) against
-real files on disk, reading the raw HTML response rather than just asserting `containsString(...)`
-in MockMvc. This caught two real bugs a looser test would have missed — the session-mutation gotcha
-and the Thymeleaf fragment-precedence gotcha above, both invisible to MockMvc/`containsString`.
-When changing wizard/search rendering logic, re-run this kind of check, not just the existing
-tests.
+**The frontend's Basic-auth-in-`sessionStorage` login (§10.2) is a deliberate, marked
+simplification, not an oversight** — see the `// ponytail:` comment on `authStorage.ts`. Don't
+"fix" it into a bigger auth system without a reason; do reach for it if this UI is ever meant to be
+reachable by more than one trusted admin.
 
 ## 12. Database & migrations
 
@@ -749,16 +635,19 @@ overrides.
 |---|---|
 | `common/V1__init.sql` | `project`, `log_source`, `filter_field`, `line_pattern` tables |
 | `common/V2__indexes.sql` | Supporting indexes |
-| `postgresql/V3__spring_session.sql` | Spring Session JDBC tables, copied verbatim from `spring-session-jdbc`'s `schema-postgresql.sql`. Prod: Flyway owns these (`spring.session.jdbc.initialize-schema: never`). Dev: Spring Session auto-creates them on the embedded H2 DB instead (`initialize-schema: embedded`) — **don't let both try to create the tables at once.** |
 | `common/V4__log_file.sql` | Adds `log_file` table (the node → per-output split, §5); migrates each existing `log_source`'s single live/backup/pattern config into a `log_file` row labeled `"Application"`, reusing the `log_source` row's own id as the new `log_file` id (safe — different table's PK space); then drops those columns from `log_source`. |
 | `h2/V5__dev_seed_project.sql` | Dev-only convenience data: since it lives under the `h2` vendor location it only ever runs against the in-memory H2 dev database, never prod. Seeds one ready-to-search project ("360 API": one node/log-file, a `tid`/"Trace ID" `EXACT_TOKEN` filter field, and a `LinePattern` derived the same way the wizard's "analyze sample line" step would) so a fresh `mvnw spring-boot:run` has something to search immediately. |
 
+(There is no `V3` — it used to hold Spring Session JDBC's tables, removed along with the Thymeleaf
+UI that needed sessions; the version number is left as a gap rather than renumbered, since Flyway
+doesn't require contiguous versions and renumbering an already-applied migration on any real
+deployment would break its checksum validation.)
+
 **To add support for another database** (MySQL, Oracle, SQL Server): add its JDBC driver +
-`flyway-database-<db>` module to `pom.xml`, point `spring.datasource.*` at it, add
-`db/migration/<db>/Vn__*.sql` for anything vendor-specific, and if Spring Session needs its tables
-via Flyway there too, copy the matching `schema-<db>.sql` from `spring-session-jdbc` into
-`db/migration/<db>/`. **Known gap:** SQL Server's `TIMESTAMP` type means "rowversion," not a
-date/time column — a SQL Server target needs `db/migration/sqlserver/` using `DATETIME2` instead.
+`flyway-database-<db>` module to `pom.xml`, point `spring.datasource.*` at it, and add
+`db/migration/<db>/Vn__*.sql` for anything vendor-specific. **Known gap:** SQL Server's `TIMESTAMP`
+type means "rowversion," not a date/time column — a SQL Server target needs
+`db/migration/sqlserver/` using `DATETIME2` instead.
 
 ## 13. Configuration reference
 
@@ -785,6 +674,7 @@ date/time column — a SQL Server target needs `db/migration/sqlserver/` using `
 - `LinePattern.loggerPattern`/`timestampRegexOrPosition` are captured and persisted but **not
   currently consumed** by the search engine (`LogLineParserFactory` only reads `timestampPattern`
   and `levelPattern`) — they exist for the wizard's confirm/correct UI and potential future use.
-- The built-in search UI does not consume the SSE `/api/search/stream` endpoint — see the note in
-  §7.5. If that changes, update this section and §10.2.
+- No view-mode toggle (Cards vs. a dense Stream layout) or group-by on the search page — both real
+  features of the old Thymeleaf UI, intentionally not ported in the initial React rewrite (§10.3).
+  Add them back as new frontend features if a future task asks for them.
 - No CI/CD configuration, no Docker/containerization files.

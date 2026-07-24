@@ -21,14 +21,6 @@ spring:
     # with no code change. Missing vendor folders are ignored (fail-on-missing-locations is
     # false by default in Spring Boot).
     locations: classpath:db/migration/common,classpath:db/migration/{vendor}
-  session:
-    # Persist HTTP sessions in the database (Spring Session JDBC) so a logged-in admin stays
-    # authenticated across app instances that share the same database.
-    timeout: 30m
-    jdbc:
-      # 'embedded' lets Spring Session auto-create its tables on embedded databases (H2 dev).
-      # The prod profile overrides this to 'never' because Flyway owns the session tables there.
-      initialize-schema: embedded
 
 # Log-search engine tuning, consumed by the search pipeline.
 search:

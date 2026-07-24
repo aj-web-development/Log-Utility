@@ -32,3 +32,14 @@ build/
 ### VS Code ###
 .vscode/
 .claude/
+
+### Frontend (frontend/) ###
+frontend/node_modules/
+frontend/node/
+frontend/.tanstack/
+frontend/dist/
+# Build output of `npm run build`, generated straight into src/main/resources/static - see
+# frontend/vite.config.ts build.outDir and the frontend-maven-plugin binding in pom.xml.
+src/main/resources/static/
+frontend/.vite/
+frontend/src/routeTree.gen.ts

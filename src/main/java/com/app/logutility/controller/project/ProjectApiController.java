@@ -51,12 +51,10 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * REST equivalent of the admin project wizard/list ({@link ProjectAdminController} /
- * {@link ProjectWizardController}): full CRUD plus the parse/analyze/path-check helpers the
- * wizard uses while building a configuration. A create/update submits one complete payload rather
- * than the wizard's multi-step session draft — that draft is a UI convenience, not a business
- * rule — and both front doors share the same validation ({@link ProjectWizardValidation}) and
- * persistence ({@link ProjectService#saveFromWizard}).
+ * Backs the React admin wizard end to end: full CRUD plus the parse/analyze/path-check helpers the
+ * wizard calls while building a configuration. A create/update submits one complete payload built
+ * client-side from the wizard's step state, validated with {@link ProjectWizardValidation} and
+ * persisted with {@link ProjectService#saveFromWizard}.
  */
 @RestController
 @RequestMapping("/api/projects")

@@ -33,8 +33,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * REST equivalent of {@link SearchControllerTest}: public, no authentication, JSON in/out
- * instead of cookies/HTML fragments.
+ * Public, no authentication required, JSON in/out.
  */
 @SpringBootTest
 class SearchApiControllerTest {

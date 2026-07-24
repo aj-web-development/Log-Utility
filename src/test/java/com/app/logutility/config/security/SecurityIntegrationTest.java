@@ -4,28 +4,23 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestBuilders.formLogin;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.httpBasic;
-import static org.springframework.security.test.web.servlet.response.SecurityMockMvcResultMatchers.authenticated;
-import static org.springframework.security.test.web.servlet.response.SecurityMockMvcResultMatchers.unauthenticated;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * Verifies the public/protected split and the single-admin form login (dev creds admin/admin) for
- * the Thymeleaf UI's session-based chain, plus the separate stateless HTTP Basic chain for
- * {@code /api/**} (see {@link SecurityConfig#apiSecurityFilterChain}) — an anonymous request there
- * gets a bare 401, not a redirect to {@code /login}, since there's no session to redirect into.
- * MockMvc is built with {@code springSecurity()} so the Spring Security filter chain and the
- * {@code @WithMockUser} context are applied to each request.
+ * The app is a single stateless chain: {@code /api/projects/**} requires the single admin account
+ * over HTTP Basic on every request (dev creds admin/admin); everything else — including the SPA
+ * shell paths served by {@link com.app.logutility.controller.web.SpaController} — is public, since
+ * there's no more server-rendered content there to gate. An anonymous request to
+ * {@code /api/projects/**} gets a bare 401, never a redirect (there's no session/login page to
+ * redirect into). MockMvc is built with {@code springSecurity()} so the Spring Security filter
+ * chain is applied to each request.
  */
 @SpringBootTest
 class SecurityIntegrationTest {
@@ -48,36 +43,16 @@ class SecurityIntegrationTest {
     }
 
     @Test
-    void loginPageIsPublic() throws Exception {
+    void loginRouteIsPublic() throws Exception {
         mvc.perform(get("/login")).andExpect(status().isOk());
     }
 
     @Test
-    void adminRedirectsToLoginWhenAnonymous() throws Exception {
-        mvc.perform(get("/admin"))
-                .andExpect(status().is3xxRedirection())
-                .andExpect(result -> assertThat(result.getResponse().getRedirectedUrl())
-                        .isNotNull()
-                        .endsWith("/login"));
-    }
-
-    @Test
-    @WithMockUser(roles = "ADMIN")
-    void adminIsReachableWhenAuthenticated() throws Exception {
+    void adminRouteIsPublicShellAnonymously() throws Exception {
+        // The SPA shell loads for anyone; its own JS decides what to render based on whether an
+        // authenticated /api/projects/** call succeeds. Page-level access control is gone because
+        // there's no server-rendered admin page left to protect.
         mvc.perform(get("/admin")).andExpect(status().isOk());
-    }
-
-    @Test
-    void formLoginSucceedsWithConfiguredCredentials() throws Exception {
-        mvc.perform(formLogin().user("admin").password("admin"))
-                .andExpect(authenticated().withUsername("admin"))
-                .andExpect(redirectedUrl("/admin"));
-    }
-
-    @Test
-    void formLoginFailsWithWrongPassword() throws Exception {
-        mvc.perform(formLogin().user("admin").password("nope"))
-                .andExpect(unauthenticated());
     }
 
     @Test
@@ -87,7 +62,6 @@ class SecurityIntegrationTest {
 
     @Test
     void apiProjectsRejectsAnonymousWithoutRedirecting() throws Exception {
-        // Unlike /admin, this must be a bare 401 — there's no session to redirect into.
         mvc.perform(get("/api/projects")).andExpect(status().isUnauthorized());
     }
 

@@ -64,30 +64,12 @@
 			<artifactId>spring-boot-starter-validation</artifactId>
 		</dependency>
 
-		<!-- Security + server-rendered views (admin login/wizard, public search UI). -->
+		<!-- Security for the JSON API (/api/projects/** requires the single admin account over
+		     HTTP Basic; everything else, including the static React SPA, is public). Stateless —
+		     no server-rendered views, no sessions. -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-security</artifactId>
-		</dependency>
-		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-thymeleaf</artifactId>
-		</dependency>
-		<dependency>
-			<groupId>org.thymeleaf.extras</groupId>
-			<artifactId>thymeleaf-extras-springsecurity6</artifactId>
-		</dependency>
-
-		<!-- Spring Session JDBC so admin sessions are shared across app instances via the DB.
-		     As with Flyway, Boot 4 needs the spring-boot-session-jdbc auto-config module; the
-		     spring-session-jdbc jar supplies the JDBC session repository itself. -->
-		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-session-jdbc</artifactId>
-		</dependency>
-		<dependency>
-			<groupId>org.springframework.session</groupId>
-			<artifactId>spring-session-jdbc</artifactId>
 		</dependency>
 
 		<!-- Flyway. In Spring Boot 4 auto-configuration is modularized, so flyway-core alone
@@ -186,6 +168,49 @@
 									<artifactId>lombok</artifactId>
 								</path>
 							</annotationProcessorPaths>
+						</configuration>
+					</execution>
+				</executions>
+			</plugin>
+			<!-- Builds the React SPA (frontend/) and drops it straight into
+			     src/main/resources/static (frontend/vite.config.ts build.outDir), so a plain
+			     `mvnw clean package` produces one self-contained jar/war with no separate frontend
+			     build step or Node.js pre-installed on the machine - this plugin downloads a
+			     pinned Node/npm into .m2 the first time it runs. -->
+			<plugin>
+				<groupId>com.github.eirslett</groupId>
+				<artifactId>frontend-maven-plugin</artifactId>
+				<version>1.15.1</version>
+				<configuration>
+					<workingDirectory>frontend</workingDirectory>
+				</configuration>
+				<executions>
+					<execution>
+						<id>install-node-and-npm</id>
+						<goals>
+							<goal>install-node-and-npm</goal>
+						</goals>
+						<configuration>
+							<nodeVersion>v22.14.0</nodeVersion>
+						</configuration>
+					</execution>
+					<execution>
+						<id>npm-install</id>
+						<goals>
+							<goal>npm</goal>
+						</goals>
+						<configuration>
+							<arguments>ci</arguments>
+						</configuration>
+					</execution>
+					<execution>
+						<id>npm-build</id>
+						<phase>generate-resources</phase>
+						<goals>
+							<goal>npm</goal>
+						</goals>
+						<configuration>
+							<arguments>run build</arguments>
 						</configuration>
 					</execution>
 				</executions>

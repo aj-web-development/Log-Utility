@@ -22,8 +22,8 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * The public, unauthenticated REST search API — the JSON equivalent of {@link SearchController},
- * for any external UI that wants to build its own search experience against this app. Reuses
+ * The public, unauthenticated REST search API — backs the React search page, and available to any
+ * other external UI that wants to build its own search experience against this app. Reuses
  * {@link ProjectService} and {@link SearchService} directly; no new business logic here.
  */
 @RestController

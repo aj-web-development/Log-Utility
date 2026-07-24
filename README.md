@@ -8,28 +8,31 @@ configuration is behind a single admin login.
 
 ## Features
 
-- **Public search UI** — project switcher, dynamic filter form (built from the project's
-  configured fields), date range + free text, results table with color-coded log levels and an
-  expandable full-line view. No account needed.
-- **Admin project wizard** — a guided, HTMX-driven multi-step setup: project details, nodes
-  (live + backup log paths, with a live "Test path" check), a sample-line analyzer that
-  guesses the timestamp/level/logger format from a pasted line, and searchable filter fields.
+- **Public search UI** — a React SPA: project switcher, dynamic filter form (built from the
+  project's configured fields), date range + free text, batch or live/streaming results with
+  color-coded log levels and an expandable full-line view, plus a plain-text export download. No
+  account needed.
+- **Admin project wizard** — a guided multi-step setup: project details, nodes (live + backup log
+  paths, with a live "Test path" check), a sample-line analyzer that guesses the
+  timestamp/level/logger format from a pasted line, and searchable filter fields.
 - **Logback XML upload** — parses an uploaded `logback-spring.xml`: MDC keys (`%X{...}`) become
   suggested filter fields, and the rolling-file naming pattern becomes the backup path pattern.
 - **Search engine** — scans live and gzip-rotated log files across all of a project's nodes
   concurrently (Java 21 virtual threads), pruned by date before touching the filesystem, with a
   hard result cap and a "some nodes were unreachable" warning rather than a failed search.
-- **Single admin, no user database** — one admin account from environment variables; sessions
-  are shared across app instances via the database (Spring Session JDBC).
+- **Single admin, no user database** — one admin account from environment variables, checked
+  statelessly over HTTP Basic on every admin request; no sessions, nothing to share across app
+  instances.
 - **Database-portable schema** — runs on H2 (local dev) or PostgreSQL (production) via the same
   Flyway migrations; other SQL databases are supported by adding a driver and a small
   vendor-specific override (see [Database support](#database-support)).
 
 ## Tech stack
 
-Java 21 · Spring Boot 4.1 (Spring MVC, Spring Data JPA, Spring Security, Spring Session JDBC) ·
-Thymeleaf + HTMX + Alpine.js + Tailwind (CDN, no frontend build step) · Flyway · H2 (dev) /
-PostgreSQL (prod) · Maven
+Backend: Java 21 · Spring Boot 4.1 (Spring MVC, Spring Data JPA, Spring Security) ·
+springdoc-openapi · Flyway · H2 (dev) / PostgreSQL (prod) · Maven.
+Frontend (`frontend/`): React 19 · TanStack Router/Query · shadcn/Radix · Tailwind v4 · Vite,
+built by Maven into the same jar/war (see [Building](#building)).
 
 ## Running locally (dev profile / H2)
 
@@ -58,10 +61,15 @@ migrations used in production, so schema issues surface locally too.
 ## Building
 
 ```bash
-./mvnw clean package             # executable jar: target/logutility-0.0.1-SNAPSHOT.jar
+./mvnw clean package             # builds frontend/ (npm ci && npm run build), then the executable jar: target/logutility-0.0.1-SNAPSHOT.jar
 ./mvnw clean package -Pwar21     # traditional WAR for an external servlet container:
                                   #   target/logutility-java21.war
 ```
+
+The frontend build runs automatically as part of `mvnw clean package` (via
+`frontend-maven-plugin`, which downloads its own pinned Node — no need to have Node installed).
+For frontend-only iteration, `cd frontend && npm run dev` runs a Vite dev server that proxies
+`/api/**` to a `mvnw spring-boot:run` instance on port 8080.
 
 Run the jar directly with `java -jar target/logutility-0.0.1-SNAPSHOT.jar`, or deploy the WAR
 to any Java 21+ servlet container (Tomcat, etc.).
@@ -115,26 +123,18 @@ never come up without real admin credentials.
 Override via environment variables (`SEARCH_MAX_RESULTS`, `SEARCH_MAX_NODES_PARALLEL`) or a
 mounted `application.yml`.
 
-### Sessions
-
-Admin sessions are stored in the database (Spring Session JDBC) rather than in-memory, so
-multiple app instances behind a load balancer share login state automatically — no sticky
-sessions required.
-
 ## Database support
 
 Flyway migrations live under `src/main/resources/db/migration/`:
 
 - **`common/`** — the portable baseline schema, applied to every database.
 - **`{vendor}/`** — resolved automatically to the running engine (`postgresql`, `h2`, `mysql`,
-  `oracle`, `sqlserver`, ...). The `postgresql/` folder additionally includes the Spring Session
-  JDBC tables (owned by Flyway in production; auto-initialized by Spring Session itself in dev).
+  `oracle`, `sqlserver`, ...) for anything database-specific.
 
 To run against a database other than PostgreSQL in production:
 1. Add that database's JDBC driver and its `flyway-database-<db>` module to `pom.xml`.
 2. Point `spring.datasource.*` at it (override `application-prod.yml` or set env vars).
-3. If Spring Session needs its tables via Flyway, copy the matching `schema-<db>.sql` from the
-   `spring-session-jdbc` jar into `db/migration/<db>/`.
+3. Add `db/migration/<db>/Vn__*.sql` for anything vendor-specific.
 
 One known gap: SQL Server's `TIMESTAMP` type means "rowversion", not a date/time — a SQL Server
 target needs a `db/migration/sqlserver/` override using `DATETIME2` instead.
@@ -144,13 +144,16 @@ target needs a `db/migration/sqlserver/` override using `DATETIME2` instead.
 ```
 config       Cross-cutting Spring configuration
 project      Project/LogSource/FilterField/LinePattern entities + repositories
-project.config  Project CRUD service, the setup wizard, and its controllers
+project.config  Project CRUD service, wizard validation, and the REST controller both use
 parser       Logback XML parser + sample-line analyzer
 validation   Path-availability checking ("Test path")
 search       The search engine pipeline (date pruning, file readers, matchers, fan-out, merge)
-security     Single-admin authentication
-web          Public search UI controller
+security     Single-admin authentication (stateless HTTP Basic on /api/projects/**)
+web          SpaController - forwards the React SPA's client-side routes to index.html
 ```
+
+The React SPA itself lives in `frontend/` (see [CLAUDE.md](CLAUDE.md) and
+[docs/PROJECT_REFERENCE.md](docs/PROJECT_REFERENCE.md) for its structure).
 
 Search is implemented as a pipeline of single-responsibility, independently-tested components
 (date pruning → file resolution → streaming read → timestamp fast-reject → field matching →
