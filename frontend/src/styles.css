@@ -356,26 +356,21 @@
 /* ---------- react-datepicker theming (search date-range popover) -----------------------------
  * Retinted with this app's own tokens instead of the library's default look - the base stylesheet
  * (imported in datetime-field.tsx) still supplies layout/positioning, only color/font/radius are
- * overridden here so it automatically follows every skin and light/dark, same as everything else. */
+ * overridden here so it automatically follows every skin and light/dark, same as everything else.
+ * Rendered `inline` inside our own themed Popover (not react-datepicker's own popper), so there's
+ * no popper/triangle chrome to override here - only the calendar grid itself. */
 /* !important throughout this block: react-datepicker's own stylesheet is imported from inside
  * datetime-field.tsx and, being part of a lazy route chunk, its load order relative to this global
  * stylesheet isn't guaranteed - verified live that plain (non-!important) overrides here lost the
- * cascade to the vendor CSS on several properties (day background, time-list background, the
- * triangle's display) despite equal or higher selector specificity. */
-.app-datepicker-popper {
-  z-index: 50;
-}
+ * cascade to the vendor CSS on several properties (day background, the range-highlight color)
+ * despite equal or higher selector specificity. */
 .app-datepicker.react-datepicker {
   display: flex !important;
-  border: 1px solid var(--color-border) !important;
-  border-radius: var(--radius-lg) !important;
-  background: var(--color-popover) !important;
+  border: none !important;
+  background: transparent !important;
   color: var(--color-popover-foreground) !important;
   font-family: var(--font-sans) !important;
-  box-shadow: var(--shadow-elevated) !important;
-}
-.app-datepicker-popper .react-datepicker__triangle {
-  display: none !important;
+  box-shadow: none !important;
 }
 .app-datepicker .react-datepicker__month-container {
   padding: 0.75rem;
@@ -439,51 +434,23 @@
   font-weight: 600;
   box-shadow: none !important;
 }
-.app-datepicker .react-datepicker__time-container {
-  border-left: 1px solid var(--color-border) !important;
-  width: 5.5rem;
-  background: transparent !important;
+.app-datepicker .react-datepicker__day--in-range,
+.app-datepicker .react-datepicker__day--in-selecting-range {
+  background: color-mix(in oklch, var(--color-primary) 18%, transparent) !important;
+  color: var(--color-foreground) !important;
+  border-radius: 0 !important;
 }
-.app-datepicker .react-datepicker__time,
-.app-datepicker .react-datepicker__time-box {
-  background: transparent !important;
-  color: var(--color-popover-foreground) !important;
-  width: 100% !important;
-}
-.app-datepicker .react-datepicker__header--time {
-  padding-top: 0.75rem;
-  background: transparent !important;
-}
-.app-datepicker .react-datepicker-time__header {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--color-muted-foreground) !important;
-}
-.app-datepicker .react-datepicker__time-list {
-  scrollbar-width: thin;
-  background: transparent !important;
-}
-.app-datepicker .react-datepicker__time-list-item {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  height: auto !important;
-  padding: 0.35rem 0 !important;
-  background: transparent !important;
-  color: var(--color-popover-foreground) !important;
-}
-.app-datepicker .react-datepicker__time-list-item:hover {
-  background: var(--color-accent) !important;
-  color: var(--color-accent-foreground) !important;
-}
-.app-datepicker .react-datepicker__time-list-item--selected {
+.app-datepicker .react-datepicker__day--range-start,
+.app-datepicker .react-datepicker__day--range-end,
+.app-datepicker .react-datepicker__day--selecting-range-start,
+.app-datepicker .react-datepicker__day--selecting-range-end {
   background: var(--color-primary) !important;
   color: var(--color-primary-foreground) !important;
+  border-radius: var(--radius-md) !important;
   font-weight: 600;
 }
-/* Narrow viewports: the popup anchors to the trigger's left edge (react-datepicker doesn't flip
- * horizontally), so on a phone-width screen the full-size popup can run past the right edge -
- * shrink the day cells and time column enough to always fit under a 400px-wide viewport. */
+/* Narrow viewports: shrink the day cells enough that the calendar (plus the time-select row
+ * beneath it) stays comfortably inside a 400px-wide popover on a phone screen. */
 @media (max-width: 420px) {
   .app-datepicker .react-datepicker__day,
   .app-datepicker .react-datepicker__day-name {
@@ -491,8 +458,5 @@
     height: 1.5rem;
     line-height: 1.5rem;
     margin: 0.05rem;
-  }
-  .app-datepicker .react-datepicker__time-container {
-    width: 4.5rem;
   }
 }

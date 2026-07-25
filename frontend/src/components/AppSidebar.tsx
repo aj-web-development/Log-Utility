@@ -34,7 +34,7 @@ export function AppSidebar() {
   return (
     <Sidebar collapsible="icon" className="border-r">
       <SidebarHeader>
-        <div className="flex items-center gap-2 px-2 py-2">
+        <div className="flex items-center gap-2">
           <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg gradient-signal shadow-glow">
             <Activity className="h-4 w-4 text-primary-foreground" strokeWidth={2.5} />
           </div>

@@ -4,7 +4,7 @@ import { Link } from "@tanstack/react-router";
 import { AlertTriangle, ChevronRight, Download, Loader2, Play, RefreshCw, Search as SearchIcon, SlidersHorizontal, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { DateTimeField } from "@/components/ui/datetime-field";
+import { DateTimeRangeField, type RangePreset } from "@/components/ui/datetime-field";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { ApiRequestError, searchApi } from "@/lib/api";
@@ -88,12 +88,38 @@ export function SearchScreen() {
     }
   }
 
-  function pickRange(label: string, ms: number) {
-    const now = new Date();
-    setTo(toDatetimeLocal(now, zoneId));
-    setFrom(toDatetimeLocal(new Date(now.getTime() - ms), zoneId));
-    setQuickRange(label);
+  const rangeTouchedRef = useRef(false);
+
+  function applyRange(newFrom: string, newTo: string, presetLabel: string | null) {
+    rangeTouchedRef.current = true;
+    setFrom(newFrom);
+    setTo(newTo);
+    setQuickRange(presetLabel);
   }
+
+  const presets: RangePreset[] = useMemo(
+    () =>
+      QUICK_RANGES.map((r) => ({
+        label: r.label,
+        getRange: () => {
+          const now = new Date();
+          return { from: toDatetimeLocal(new Date(now.getTime() - r.ms), zoneId), to: toDatetimeLocal(now, zoneId) };
+        },
+      })),
+    [zoneId],
+  );
+
+  // Defaults the "When" field to the first quick range (5m) so the search screen never opens with
+  // an empty time window - re-derived whenever zoneId resolves (it starts as the "UTC" fallback
+  // until the project's fields load) as long as the user hasn't picked a range themselves.
+  useEffect(() => {
+    if (rangeTouchedRef.current) return;
+    const range = presets[0]?.getRange();
+    if (!range) return;
+    setFrom(range.from);
+    setTo(range.to);
+    setQuickRange(presets[0].label);
+  }, [presets]);
 
   function activeFilters(): Record<string, string> {
     const out: Record<string, string> = {};
@@ -216,20 +242,6 @@ export function SearchScreen() {
             />
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <div className="flex items-center gap-1 rounded-lg bg-muted/40 p-1">
-              {QUICK_RANGES.map((r) => (
-                <button
-                  key={r.label}
-                  onClick={() => pickRange(r.label, r.ms)}
-                  className={cn(
-                    "rounded-md px-2.5 py-1 font-mono text-xs transition-colors",
-                    quickRange === r.label ? "bg-primary text-primary-foreground shadow-glow" : "text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  {r.label}
-                </button>
-              ))}
-            </div>
             <div className="flex items-center gap-1.5 rounded-lg bg-muted/40 px-2 py-1.5 text-xs text-muted-foreground">
               <span>Live</span>
               <Switch checked={live} onCheckedChange={setLive} />
@@ -249,26 +261,7 @@ export function SearchScreen() {
             <div className="space-y-2.5 px-3 py-2.5">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-[11px] uppercase tracking-widest text-muted-foreground">When ({zoneId})</span>
-                <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  From
-                  <DateTimeField
-                    value={from}
-                    onChange={(v) => {
-                      setFrom(v);
-                      setQuickRange(null);
-                    }}
-                  />
-                </label>
-                <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  To
-                  <DateTimeField
-                    value={to}
-                    onChange={(v) => {
-                      setTo(v);
-                      setQuickRange(null);
-                    }}
-                  />
-                </label>
+                <DateTimeRangeField from={from} to={to} onApply={applyRange} presets={presets} activePreset={quickRange} />
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-[11px] uppercase tracking-widest text-muted-foreground">Levels</span>
