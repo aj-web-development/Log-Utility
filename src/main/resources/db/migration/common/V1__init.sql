@@ -3,16 +3,17 @@
 --   * UUID primary/foreign keys are stored as VARCHAR(36) rather than a native UUID type,
 --     because UUID is not portable (MySQL/Oracle/SQL Server have no native UUID column).
 --   * Enum values are stored as VARCHAR.
---   * TIMESTAMP is the SQL-standard datetime type. NOTE: on SQL Server TIMESTAMP is a
---     rowversion alias, so a SQL Server deployment needs an override script placed in
---     db/migration/sqlserver using DATETIME2 (see the {vendor} Flyway location).
+--   * Datetime columns use the ${timestampType} Flyway placeholder rather than a literal
+--     TIMESTAMP, because on SQL Server the bare word TIMESTAMP is a legacy rowversion
+--     alias, not a date/time type. spring.flyway.placeholders.timestampType picks the
+--     right SQL type per target database (see application.yml / application-prod.yml).
 
 CREATE TABLE project (
     id          VARCHAR(36)   NOT NULL,
     name        VARCHAR(200)  NOT NULL,
     description VARCHAR(2000),
-    created_at  TIMESTAMP     NOT NULL,
-    updated_at  TIMESTAMP     NOT NULL,
+    created_at  ${timestampType}     NOT NULL,
+    updated_at  ${timestampType}     NOT NULL,
     CONSTRAINT pk_project PRIMARY KEY (id),
     CONSTRAINT uq_project_name UNIQUE (name)
 );
@@ -24,7 +25,7 @@ CREATE TABLE log_source (
     live_log_path       VARCHAR(1000),
     backup_root_path    VARCHAR(1000),
     backup_path_pattern VARCHAR(1000),
-    last_checked_at     TIMESTAMP,
+    last_checked_at     ${timestampType},
     last_check_status   VARCHAR(20)   NOT NULL DEFAULT 'UNKNOWN',
     last_check_message  VARCHAR(1000),
     CONSTRAINT pk_log_source PRIMARY KEY (id),

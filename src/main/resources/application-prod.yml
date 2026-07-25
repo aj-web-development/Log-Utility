@@ -1,14 +1,40 @@
 spring:
   datasource:
-    # Production Postgres connection, supplied entirely through environment variables.
+    # Any of Postgres/MySQL/SQL Server, chosen entirely by JDBC_DATABASE_URL's scheme -
+    # Spring Boot picks the matching driver from the URL, no other config needed per engine.
     url: ${JDBC_DATABASE_URL:jdbc:postgresql://localhost:5432/logutility}
     username: ${JDBC_DATABASE_USERNAME:logutility}
     password: ${JDBC_DATABASE_PASSWORD:}
-  # Flyway locations are inherited from application.yml: the portable .../common baseline plus
-  # the {vendor} folder (resolves to db/migration/postgresql here). To target a different SQL
-  # database in production, override spring.datasource.* (url/username/password + driver) and
-  # add that database's JDBC driver plus its flyway-database-<db> module.
+  flyway:
+    # Flyway locations are inherited from application.yml: the portable .../common baseline
+    # plus the {vendor} folder, auto-resolved from the JDBC URL above (postgresql/mysql/
+    # sqlserver/...). FLYWAY_TIMESTAMP_TYPE must match the engine above: TIMESTAMP for
+    # Postgres/MySQL (the default, matches application.yml), DATETIME2 for SQL Server.
+    placeholders:
+      timestampType: ${FLYWAY_TIMESTAMP_TYPE:TIMESTAMP}
+  # To target a database engine beyond Postgres/MySQL/SQL Server/H2: add its JDBC driver plus
+  # its flyway-database-<db>/flyway-<db> module to pom.xml (see the comment there).
 
 # Admin credentials MUST be provided via environment variables in production:
 #   LOGUTY_ADMIN_USERNAME, LOGUTY_ADMIN_PASSWORD
 # The app fails fast at startup if they are missing (see SecurityConfig#userDetailsService).
+
+# See src/main/resources/logback-spring.xml (the !dev profile branch) for the full picture:
+# console + this rolling app log + a separate rolling error-only log for ops to tail/alert on.
+# logging.logback.rollingpolicy.* are Spring Boot's own recognized tuning keys; loguty.logging.*
+# below are this app's own, for the second (error-only) file that Boot has no equivalent for.
+logging:
+  file:
+    name: ${LOGUTY_LOG_FILE:logs/logutility.log}
+  logback:
+    rollingpolicy:
+      max-file-size: ${LOGUTY_LOG_MAX_FILE_SIZE:50MB}
+      max-history: ${LOGUTY_LOG_MAX_HISTORY:30}
+      total-size-cap: ${LOGUTY_LOG_TOTAL_SIZE_CAP:2GB}
+
+loguty:
+  logging:
+    error-file: ${LOGUTY_ERROR_LOG_FILE:logs/logutility-error.log}
+    # Kept longer than the app log's 30 days - errors are what an incident postmortem needs.
+    error-max-history: ${LOGUTY_ERROR_LOG_MAX_HISTORY:90}
+    error-total-size-cap: ${LOGUTY_ERROR_LOG_TOTAL_SIZE_CAP:1GB}

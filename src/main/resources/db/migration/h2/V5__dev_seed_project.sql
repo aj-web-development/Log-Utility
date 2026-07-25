@@ -24,10 +24,13 @@ VALUES ('9c8b7a6f-5e4d-4c3b-8a2b-1a2b3c4d5e6f', '3f6a1c2e-8b1d-4a2f-9c3e-1a2b3c4
 
 -- Derived the same way the admin wizard's "analyze sample line" step would, from:
 -- 2026-07-21 14:27:07.584 +0530 [http-nio-8081-exec-2] ERROR c.in10s.util.Utils :: tid=... :: - ...
+-- The +0530 offset is what the app actually logs in (IST) - time_zone reflects that so a fresh
+-- dev run exercises the non-UTC path, not just the (far more common) UTC default.
 INSERT INTO line_pattern (id, project_id, timestamp_pattern, timestamp_regex_or_position,
-                           level_pattern, logger_pattern)
+                           level_pattern, logger_pattern, time_zone)
 VALUES ('1e2d3c4b-5a6f-4e7d-8c9b-0a1b2c3d4e5f', '3f6a1c2e-8b1d-4a2f-9c3e-1a2b3c4d5e6f',
         'yyyy-MM-dd HH:mm:ss.SSS',
         '(\d{4}-\d{2}-\d{2})([ T])(\d{2}:\d{2}:\d{2})(?:([.,])(\d{1,9}))?',
         '\b(TRACE|DEBUG|INFO|WARN|WARNING|ERROR|FATAL)\b',
-        '\b[a-zA-Z_$][\w$]*(?:\.[a-zA-Z_$][\w$]*)+\b');
+        '\b[a-zA-Z_$][\w$]*(?:\.[a-zA-Z_$][\w$]*)+\b',
+        'Asia/Kolkata');

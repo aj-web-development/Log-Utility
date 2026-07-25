@@ -19,6 +19,7 @@ import org.springframework.web.context.WebApplicationContext;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.UUID;
 
@@ -57,8 +58,8 @@ class SearchStreamControllerTest {
 
         MvcResult mvcResult = mvc.perform(get("/api/search/stream")
                         .param("projectId", projectId.toString())
-                        .param("from", now.minusHours(1).format(DateTimeFormatter.ISO_LOCAL_DATE_TIME))
-                        .param("to", now.plusHours(1).format(DateTimeFormatter.ISO_LOCAL_DATE_TIME))
+                        .param("from", now.minusHours(1).toInstant(ZoneOffset.UTC).toString())
+                        .param("to", now.plusHours(1).toInstant(ZoneOffset.UTC).toString())
                         .param("filter_tid", "stream123"))
                 .andExpect(request().asyncStarted())
                 .andReturn();
@@ -104,8 +105,8 @@ class SearchStreamControllerTest {
 
         mvc.perform(get("/api/search/export")
                         .param("projectId", projectId.toString())
-                        .param("from", now.minusHours(1).format(DateTimeFormatter.ISO_LOCAL_DATE_TIME))
-                        .param("to", now.plusHours(1).format(DateTimeFormatter.ISO_LOCAL_DATE_TIME))
+                        .param("from", now.minusHours(1).toInstant(ZoneOffset.UTC).toString())
+                        .param("to", now.plusHours(1).toInstant(ZoneOffset.UTC).toString())
                         .param("filter_tid", "export123"))
                 .andExpect(status().isOk())
                 .andExpect(header().string("Content-Disposition", containsString("attachment")))

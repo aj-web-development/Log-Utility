@@ -2,7 +2,7 @@ package com.app.logutility.service.search;
 
 import org.springframework.stereotype.Component;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.List;
 import java.util.PriorityQueue;
 import java.util.function.Consumer;
@@ -59,8 +59,8 @@ public class StreamingResultMerger {
     }
 
     private record Peeked(NodeProducer producer, LogLine line) {
-        LocalDateTime sortKey() {
-            return line.timestamp() == null ? LocalDateTime.MAX : line.timestamp();
+        Instant sortKey() {
+            return line.timestamp() == null ? Instant.MAX : line.timestamp();
         }
     }
 }

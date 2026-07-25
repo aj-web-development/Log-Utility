@@ -31,6 +31,10 @@ export interface PublicProjectView {
   id: string;
   name: string;
   fields: PublicFilterFieldView[];
+  /** IANA zone the backend actually parses/searches this project's raw log digits in - the
+   * search page's date pickers must interpret "From"/"To" in this zone, not the browser's own
+   * (see toDatetimeLocal/toBackendDateTime in features/search/logLine.ts). */
+  zoneId: string;
 }
 
 export interface LogFileRequest {
@@ -72,6 +76,7 @@ export interface LinePatternRequest {
   timestampRegexOrPosition: string;
   levelPattern: string | null;
   loggerPattern: string | null;
+  timeZone: string;
 }
 
 export type LinePatternResponse = LinePatternRequest;

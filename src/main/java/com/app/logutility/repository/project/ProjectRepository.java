@@ -35,11 +35,13 @@ public interface ProjectRepository extends JpaRepository<Project, UUID> {
     List<ProjectSummaryDto> findAllSummaries();
 
     /**
-     * Loads a project with its filter fields in one query to avoid an N+1 when rendering the
-     * search form. Fields and sources are separate {@code List} bags, so they are fetched by
-     * distinct queries rather than a single join (which would raise MultipleBagFetchException).
+     * Loads a project with its filter fields and line pattern in one query to avoid an N+1 when
+     * rendering the search form (fields for the filter inputs, line pattern for the zone the date
+     * pickers must use - see {@code PublicProjectView}). {@code linePattern} is a to-one
+     * association so joining it alongside the {@code filterFields} bag is safe; a second {@code
+     * List} bag would raise MultipleBagFetchException, a to-one association does not.
      */
-    @Query("select p from Project p left join fetch p.filterFields where p.id = :id")
+    @Query("select p from Project p left join fetch p.filterFields left join fetch p.linePattern where p.id = :id")
     Optional<Project> findByIdWithFilterFields(@Param("id") UUID id);
 
     /** Loads a project with its log sources in one query (see {@link #findByIdWithFilterFields}). */

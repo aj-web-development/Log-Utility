@@ -71,8 +71,9 @@ The frontend build runs automatically as part of `mvnw clean package` (via
 For frontend-only iteration, `cd frontend && npm run dev` runs a Vite dev server that proxies
 `/api/**` to a `mvnw spring-boot:run` instance on port 8080.
 
-Run the jar directly with `java -jar target/logutility-0.0.1-SNAPSHOT.jar`, or deploy the WAR
-to any Java 21+ servlet container (Tomcat, etc.).
+Run the jar directly with `java -jar target/logutility-0.0.1-SNAPSHOT.jar`, or deploy the WAR to
+any Java 21+ servlet container (Tomcat, etc.). For a full walkthrough of both — plus Docker — see
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 ## Running tests
 
@@ -93,13 +94,14 @@ production-specific needs to change in the packaged jar/WAR itself.
 export SPRING_PROFILES_ACTIVE=prod
 ```
 
-### Database (PostgreSQL)
+### Database (Postgres, MySQL, or SQL Server)
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `JDBC_DATABASE_URL` | `jdbc:postgresql://localhost:5432/logutility` | JDBC connection URL |
+| `JDBC_DATABASE_URL` | `jdbc:postgresql://localhost:5432/logutility` | JDBC connection URL — its scheme (`jdbc:postgresql:`/`jdbc:mysql:`/`jdbc:sqlserver:`) picks the driver, all three ship on the classpath |
 | `JDBC_DATABASE_USERNAME` | `logutility` | Database user |
 | `JDBC_DATABASE_PASSWORD` | *(empty)* | Database password |
+| `FLYWAY_TIMESTAMP_TYPE` | `TIMESTAMP` | Set to `DATETIME2` for SQL Server (bare `TIMESTAMP` there means "rowversion", not a date/time type) — leave default for Postgres/MySQL |
 
 Flyway runs automatically on startup and creates/updates the schema — no manual migration step.
 
@@ -125,19 +127,22 @@ mounted `application.yml`.
 
 ## Database support
 
+PostgreSQL, MySQL, and SQL Server drivers + Flyway modules all ship on the classpath already;
+which one is used is decided purely by `JDBC_DATABASE_URL`'s scheme at boot, no rebuild needed.
+
 Flyway migrations live under `src/main/resources/db/migration/`:
 
-- **`common/`** — the portable baseline schema, applied to every database.
-- **`{vendor}/`** — resolved automatically to the running engine (`postgresql`, `h2`, `mysql`,
-  `oracle`, `sqlserver`, ...) for anything database-specific.
+- **`common/`** — the portable baseline schema, applied to every database. Datetime columns use
+  the `${timestampType}` Flyway placeholder (`spring.flyway.placeholders.timestampType`, overridden
+  via `FLYWAY_TIMESTAMP_TYPE`) rather than a literal `TIMESTAMP`, since that word means "rowversion"
+  on SQL Server, not a date/time type — see `application-prod.yml`.
+- **`{vendor}/`** — resolved automatically to the running engine (`h2` for dev; add
+  `postgresql/`/`mysql/`/`sqlserver/` for anything else database-specific in the future) for
+  overrides beyond what the placeholder covers.
 
-To run against a database other than PostgreSQL in production:
-1. Add that database's JDBC driver and its `flyway-database-<db>` module to `pom.xml`.
-2. Point `spring.datasource.*` at it (override `application-prod.yml` or set env vars).
-3. Add `db/migration/<db>/Vn__*.sql` for anything vendor-specific.
-
-One known gap: SQL Server's `TIMESTAMP` type means "rowversion", not a date/time — a SQL Server
-target needs a `db/migration/sqlserver/` override using `DATETIME2` instead.
+To add support for a database beyond these four: add its JDBC driver and its
+`flyway-database-<db>`/`flyway-<db>` module to `pom.xml`, point `spring.datasource.*` at it, and
+add `db/migration/<db>/Vn__*.sql` for anything vendor-specific.
 
 ## Project layout
 

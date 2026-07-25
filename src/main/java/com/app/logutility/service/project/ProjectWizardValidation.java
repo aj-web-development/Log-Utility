@@ -2,6 +2,10 @@ package com.app.logutility.service.project;
 
 import com.app.logutility.request.project.FilterFieldForm;
 import com.app.logutility.request.project.ProjectWizardForm;
+import org.springframework.util.StringUtils;
+
+import java.time.DateTimeException;
+import java.time.ZoneId;
 
 /**
  * What makes a {@link ProjectWizardForm} valid to persist. Used by {@code ProjectApiController}
@@ -35,6 +39,18 @@ public final class ProjectWizardValidation {
             boolean hasLabel = f.getLabel() != null && !f.getLabel().isBlank();
             if (hasKey ^ hasLabel) {
                 return "Each filter field needs both a key and a label.";
+            }
+        }
+        return null;
+    }
+
+    public static String validateLinePattern(ProjectWizardForm draft) {
+        String zone = draft.getLinePattern().getTimeZone();
+        if (StringUtils.hasText(zone)) {
+            try {
+                ZoneId.of(zone.trim());
+            } catch (DateTimeException e) {
+                return "Invalid time zone: \"" + zone.trim() + "\" (use an IANA zone id, e.g. UTC or Asia/Kolkata).";
             }
         }
         return null;

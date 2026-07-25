@@ -1,6 +1,7 @@
 package com.app.logutility.service.search;
 
 import com.app.logutility.entity.project.FilterField;
+import com.app.logutility.entity.project.LinePattern;
 import com.app.logutility.entity.project.LogFile;
 import com.app.logutility.entity.project.LogSource;
 import com.app.logutility.entity.project.MatchType;
@@ -17,7 +18,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -97,6 +102,8 @@ public class SearchServiceImpl implements SearchService {
 
             List<LogLine> page = paginate(merged, request.page(), request.pageSize());
             long elapsed = System.currentTimeMillis() - startMillis;
+            log.info("Search projectId={} matched={} truncated={} elapsedMs={}",
+                    request.projectId(), outcome.totalMatched(), outcome.truncated(), elapsed);
             return new SearchResult(page, outcome.totalMatched(), outcome.truncated(),
                     outcome.unreachableNodes(), elapsed);
         } finally {
@@ -126,6 +133,8 @@ public class SearchServiceImpl implements SearchService {
             }
 
             long elapsed = System.currentTimeMillis() - startMillis;
+            log.info("Streamed search projectId={} matched={} truncated={} elapsedMs={}",
+                    request.projectId(), outcome.totalMatched(), outcome.truncated(), elapsed);
             onComplete.accept(new SearchSummary(
                     outcome.totalMatched(), outcome.truncated(), outcome.unreachableNodes(), elapsed));
         } finally {
@@ -138,16 +147,24 @@ public class SearchServiceImpl implements SearchService {
     /** Loads the project, resolves defaults, and validates the range — all before any I/O work starts. */
     private SearchContext prepare(SearchRequest request) {
         LoadedProject project = loader.load(request.projectId());
+        ZoneId zone = resolveZone(project.linePattern());
 
-        LocalDateTime to = request.to() != null ? request.to() : LocalDateTime.now(clock);
-        LocalDateTime from = request.from() != null ? request.from() : to.minusDays(1);
+        Instant toInstant = request.to() != null ? request.to() : clock.instant();
+        Instant fromInstant = request.from() != null ? request.from() : toInstant.minus(1, ChronoUnit.DAYS);
+        LocalDateTime to = LocalDateTime.ofInstant(toInstant, zone);
+        LocalDateTime from = LocalDateTime.ofInstant(fromInstant, zone);
         validateRange(from, to);
 
         LogLineParser parser = parserFactory.create(project.linePattern());
         Predicate<String> lineMatches = buildPredicate(request, project.fields());
         int maxResults = Math.max(1, properties.getMaxResults());
 
-        return new SearchContext(project, from, to, parser, lineMatches, maxResults);
+        return new SearchContext(project, from, to, zone, parser, lineMatches, maxResults);
+    }
+
+    /** The zone the project's raw log digits are written in; falls back to UTC if unset/invalid. */
+    private static ZoneId resolveZone(LinePattern linePattern) {
+        return linePattern == null ? ZoneOffset.UTC : linePattern.resolveZoneId();
     }
 
     private void validateRange(LocalDateTime from, LocalDateTime to) {
@@ -169,7 +186,7 @@ public class SearchServiceImpl implements SearchService {
         }
     }
 
-    private record SearchContext(LoadedProject project, LocalDateTime from, LocalDateTime to,
+    private record SearchContext(LoadedProject project, LocalDateTime from, LocalDateTime to, ZoneId zone,
                                  LogLineParser parser, Predicate<String> lineMatches, int maxResults) {
     }
 
@@ -232,7 +249,7 @@ public class SearchServiceImpl implements SearchService {
                 return;
             }
 
-            for (Path path : resolveFiles(file, ctx.from(), ctx.to(), liveReachable, backupReachable)) {
+            for (Path path : resolveFiles(file, ctx.from(), ctx.to(), ctx.zone(), liveReachable, backupReachable)) {
                 if (state.truncated.get()) {
                     return;
                 }
@@ -255,10 +272,10 @@ public class SearchServiceImpl implements SearchService {
     }
 
     /** Backups first (oldest→newest by name), then the live file last, so results run chronologically. */
-    private List<Path> resolveFiles(LogFile file, LocalDateTime from, LocalDateTime to,
+    private List<Path> resolveFiles(LogFile file, LocalDateTime from, LocalDateTime to, ZoneId zone,
                                     boolean liveReachable, boolean backupReachable) {
         List<Path> files = new ArrayList<>();
-        ScanPlan plan = datePruner.plan(file.getBackupRootPath(), file.getBackupPathPattern(), from, to);
+        ScanPlan plan = datePruner.plan(file.getBackupRootPath(), file.getBackupPathPattern(), from, to, zone);
 
         if (backupReachable && !plan.backupGlobs().isEmpty()) {
             Path base = Path.of(file.getBackupRootPath());
@@ -300,7 +317,8 @@ public class SearchServiceImpl implements SearchService {
                 if (!ctx.lineMatches().test(entry.raw())) {
                     continue;
                 }
-                producer.offer(new LogLine(nodeLabel, fileLabel, ts, entry.level(), entry.raw()));
+                Instant instant = ts == null ? null : ts.atZone(ctx.zone()).toInstant();
+                producer.offer(new LogLine(nodeLabel, fileLabel, instant, entry.level(), entry.raw()));
             }
         } catch (IOException e) {
             log.warn("Could not read {}: {}", path, e.toString());

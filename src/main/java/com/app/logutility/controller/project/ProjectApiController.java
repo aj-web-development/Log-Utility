@@ -149,6 +149,9 @@ public class ProjectApiController {
         if (error == null) {
             error = ProjectWizardValidation.validateFields(form);
         }
+        if (error == null) {
+            error = ProjectWizardValidation.validateLinePattern(form);
+        }
         if (error != null) {
             throw new IllegalArgumentException(error);
         }
@@ -194,6 +197,7 @@ public class ProjectApiController {
             lpf.setTimestampRegexOrPosition(lpr.timestampRegexOrPosition());
             lpf.setLevelPattern(lpr.levelPattern());
             lpf.setLoggerPattern(lpr.loggerPattern());
+            lpf.setTimeZone(lpr.timeZone());
         }
         return form;
     }
@@ -217,7 +221,7 @@ public class ProjectApiController {
         LinePatternForm lpf = form.getLinePattern();
         LinePatternResponse linePattern = lpf.hasAnyContent()
                 ? new LinePatternResponse(lpf.getTimestampPattern(), lpf.getTimestampRegexOrPosition(),
-                        lpf.getLevelPattern(), lpf.getLoggerPattern())
+                        lpf.getLevelPattern(), lpf.getLoggerPattern(), lpf.getTimeZone())
                 : null;
 
         return new ProjectDetailResponse(form.getProjectId(), form.getName(), form.getDescription(), nodes, fields, linePattern);

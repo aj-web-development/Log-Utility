@@ -13,6 +13,7 @@ import jakarta.annotation.PreDestroy;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.http.MediaType;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -23,8 +24,8 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.time.Instant;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -69,7 +70,20 @@ public class SearchStreamController {
         SearchRequest request = buildRequest(projectId, from, to, freeText, allParams);
 
         SseEmitter emitter = new SseEmitter(properties.getSseTimeoutMillis());
-        executor.execute(() -> runStream(request, emitter));
+        // The search itself runs on this executor's thread, not the request thread that's about
+        // to return - MDC is thread-local, so the trace id TraceIdFilter set has to be copied
+        // across by hand or every log line from here on loses its tid=.
+        Map<String, String> mdcContext = MDC.getCopyOfContextMap();
+        executor.execute(() -> {
+            if (mdcContext != null) {
+                MDC.setContextMap(mdcContext);
+            }
+            try {
+                runStream(request, emitter);
+            } finally {
+                MDC.clear();
+            }
+        });
         return emitter;
     }
 
@@ -130,12 +144,12 @@ public class SearchStreamController {
         }
     }
 
-    private static LocalDateTime parseDateTime(String value) {
+    private static Instant parseDateTime(String value) {
         if (!StringUtils.hasText(value)) {
             return null;
         }
         try {
-            return LocalDateTime.parse(value);
+            return Instant.parse(value);
         } catch (DateTimeParseException e) {
             return null;
         }

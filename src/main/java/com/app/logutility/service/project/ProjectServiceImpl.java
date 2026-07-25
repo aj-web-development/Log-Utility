@@ -13,6 +13,8 @@ import com.app.logutility.repository.project.ProjectRepository;
 import com.app.logutility.service.validation.PathAvailabilityChecker;
 import com.app.logutility.response.validation.PathCheckResult;
 import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -36,6 +38,8 @@ import com.app.logutility.response.project.PublicProjectView;
 @RequiredArgsConstructor
 public class ProjectServiceImpl implements ProjectService {
 
+    private static final Logger log = LoggerFactory.getLogger(ProjectServiceImpl.class);
+
     private final ProjectRepository projectRepository;
     private final LogFileRepository logFileRepository;
     private final PathAvailabilityChecker pathAvailabilityChecker;
@@ -54,7 +58,8 @@ public class ProjectServiceImpl implements ProjectService {
                 project.getName(),
                 project.getFilterFields().stream()
                         .map(f -> new PublicFilterFieldView(f.getKey(), f.getLabel()))
-                        .toList()));
+                        .toList(),
+                project.getLinePattern() == null ? "UTC" : project.getLinePattern().resolveZoneId().getId()));
     }
 
     @Override
@@ -70,7 +75,8 @@ public class ProjectServiceImpl implements ProjectService {
     @Override
     @Transactional
     public UUID saveFromWizard(ProjectWizardForm form) {
-        Project project = form.getProjectId() == null
+        boolean isNew = form.getProjectId() == null;
+        Project project = isNew
                 ? new Project()
                 : projectRepository.findById(form.getProjectId())
                         .orElseThrow(() -> new ProjectNotFoundException(form.getProjectId()));
@@ -121,13 +127,16 @@ public class ProjectServiceImpl implements ProjectService {
             linePattern.setTimestampRegexOrPosition(trimToNull(lpForm.getTimestampRegexOrPosition()));
             linePattern.setLevelPattern(trimToNull(lpForm.getLevelPattern()));
             linePattern.setLoggerPattern(trimToNull(lpForm.getLoggerPattern()));
+            linePattern.setZoneId(StringUtils.hasText(lpForm.getTimeZone()) ? lpForm.getTimeZone().trim() : "UTC");
             project.setLinePattern(linePattern);
         } else {
             // orphanRemoval on Project.linePattern deletes the previously-saved row, if any.
             project.setLinePattern(null);
         }
 
-        return projectRepository.save(project).getId();
+        UUID id = projectRepository.save(project).getId();
+        log.info("{} project {} \"{}\"", isNew ? "Created" : "Updated", id, project.getName());
+        return id;
     }
 
     @Override
@@ -176,6 +185,7 @@ public class ProjectServiceImpl implements ProjectService {
             form.getLinePattern().setTimestampRegexOrPosition(linePattern.getTimestampRegexOrPosition());
             form.getLinePattern().setLevelPattern(linePattern.getLevelPattern());
             form.getLinePattern().setLoggerPattern(linePattern.getLoggerPattern());
+            form.getLinePattern().setTimeZone(linePattern.getZoneId());
         }
         return form;
     }
@@ -183,7 +193,10 @@ public class ProjectServiceImpl implements ProjectService {
     @Override
     @Transactional
     public void deleteProject(UUID id) {
-        projectRepository.findById(id).ifPresent(projectRepository::delete);
+        projectRepository.findById(id).ifPresentOrElse(project -> {
+            projectRepository.delete(project);
+            log.info("Deleted project {} \"{}\"", id, project.getName());
+        }, () -> log.info("Delete requested for missing project {}", id));
     }
 
     @Override

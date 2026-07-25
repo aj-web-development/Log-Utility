@@ -1,0 +1,38 @@
+name: log-utility
+
+services:
+  log-utility-app:
+    # Pulled from the registry, not built here - build with plain `docker build`/`docker push`
+    # (see docs/DEPLOYMENT.md), then just `docker compose pull && docker compose up -d` on
+    # each deploy target. No source tree or Dockerfile needed on this machine.
+    image: ${IMAGE_NAME:-logutility}:${IMAGE_TAG:-latest}
+    container_name: "log-utility"
+    restart: on-failure:5
+    ports:
+      - "8585:8080" # host:container - change the host side (8585) if it's taken locally
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      # Points at your already-running Postgres/MySQL/SQL Server - engine is picked
+      # entirely by this URL's scheme, see .env.example for all three forms.
+      JDBC_DATABASE_URL: ${JDBC_DATABASE_URL:?set JDBC_DATABASE_URL in .env}
+      JDBC_DATABASE_USERNAME: ${JDBC_DATABASE_USERNAME:?set JDBC_DATABASE_USERNAME in .env}
+      JDBC_DATABASE_PASSWORD: ${JDBC_DATABASE_PASSWORD:?set JDBC_DATABASE_PASSWORD in .env}
+      # Must match the engine above: TIMESTAMP for Postgres/MySQL, DATETIME2 for SQL Server.
+      FLYWAY_TIMESTAMP_TYPE: ${FLYWAY_TIMESTAMP_TYPE:-TIMESTAMP}
+      LOGUTY_ADMIN_USERNAME: ${LOGUTY_ADMIN_USERNAME:?set LOGUTY_ADMIN_USERNAME in .env}
+      LOGUTY_ADMIN_PASSWORD: ${LOGUTY_ADMIN_PASSWORD:?set LOGUTY_ADMIN_PASSWORD in .env}
+    # LOGS_HOST_ROOT (set per environment in .env) is the shared root every target
+    # project's logs/backups live under on that host. Mounted read-only at the SAME path
+    # inside the container, so any liveLogPath/backupRootPath an admin enters in the
+    # wizard is identical on the host and in the container. Adding a new project at
+    # runtime under this root needs no compose change or restart - only a genuinely new
+    # root (different top-level path) needs another line here. (The app itself runs from
+    # /opt/logutility, not this root - see Dockerfile - so it can't collide.)
+    volumes:
+      - ${LOGS_HOST_ROOT:?set LOGS_HOST_ROOT in .env}:${LOGS_HOST_ROOT:?set LOGS_HOST_ROOT in .env}:ro
+      # This app's OWN logs (see logback-spring.xml) - not the target apps' logs above.
+      # Bind-mounted (not a named volume) so they land at a path you choose and survive
+      # `docker compose pull && up -d` recreating the container. LOG_HOST_DIR must exist and be
+      # writable by uid 10001 (the container's non-root user - see Dockerfile) before first start:
+      #   mkdir -p "$LOG_HOST_DIR" && chown 10001:10001 "$LOG_HOST_DIR"
+      - ${LOG_HOST_DIR:?set LOG_HOST_DIR in .env}:/opt/logutility/logs

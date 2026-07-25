@@ -25,6 +25,7 @@ export function SampleLineStep({ state, setState }: { state: WizardState; setSta
       setState((s) => ({
         ...s,
         linePattern: {
+          ...s.linePattern,
           timestampPattern: analysis.suggestedTimestampPattern ?? s.linePattern.timestampPattern,
           timestampRegexOrPosition: analysis.suggestedTimestampRegex ?? s.linePattern.timestampRegexOrPosition,
           levelPattern: analysis.suggestedLevelPattern ?? s.linePattern.levelPattern,

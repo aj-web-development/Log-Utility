@@ -12,7 +12,11 @@ import lombok.Setter;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.annotations.UuidGenerator;
 import org.hibernate.type.SqlTypes;
+import org.springframework.util.StringUtils;
 
+import java.time.DateTimeException;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.UUID;
 
 /**
@@ -51,4 +55,26 @@ public class LinePattern {
     /** Regex (or positional hint) locating the logger token. */
     @Column(name = "logger_pattern", length = 500)
     private String loggerPattern;
+
+    /** IANA zone id the raw timestamp digits are written in, e.g. {@code UTC} or {@code Asia/Kolkata}. */
+    @Column(name = "time_zone", length = 64, nullable = false)
+    private String zoneId = "UTC";
+
+    /**
+     * The zone actually used for parsing/searching - falls back to UTC if {@link #zoneId} is unset
+     * or not a valid IANA zone id. The single source of truth for that fallback: both the search
+     * engine (comparing a request's from/to against this project's raw log digits) and the public
+     * search API (telling the frontend what zone its date pickers mean) must agree, or a search for
+     * an explicit date range can silently target the wrong window relative to what's on disk.
+     */
+    public ZoneId resolveZoneId() {
+        if (!StringUtils.hasText(zoneId)) {
+            return ZoneOffset.UTC;
+        }
+        try {
+            return ZoneId.of(zoneId);
+        } catch (DateTimeException e) {
+            return ZoneOffset.UTC;
+        }
+    }
 }

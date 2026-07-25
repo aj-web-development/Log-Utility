@@ -18,3 +18,7 @@ loguty:
   admin:
     username: admin
     password: admin
+
+logging:
+  level:
+    com.app.logutility: debug

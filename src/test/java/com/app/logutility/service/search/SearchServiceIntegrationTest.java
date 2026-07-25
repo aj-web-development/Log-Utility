@@ -18,6 +18,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -99,8 +100,8 @@ class SearchServiceIntegrationTest {
     void searchesAcrossLiveAndRotatedFilesAndSortsByTimestamp() {
         SearchResult result = searchService.search(new SearchRequest(
                 projectId,
-                dayA.toLocalDate().atStartOfDay(),
-                LocalDateTime.now().plusDays(1),
+                dayA.toLocalDate().atStartOfDay().toInstant(ZoneOffset.UTC),
+                LocalDateTime.now().plusDays(1).toInstant(ZoneOffset.UTC),
                 Map.of(), "", 0, 0));
 
         // 5 entries (3 backup + 2 live); the stack-trace continuation line has no timestamp of its
@@ -114,7 +115,7 @@ class SearchServiceIntegrationTest {
         assertThat(result.truncated()).isFalse();
 
         // Oldest backup line must sort before the newest live line.
-        List<LocalDateTime> timestamps = result.lines().stream()
+        List<java.time.Instant> timestamps = result.lines().stream()
                 .map(LogLine::timestamp).filter(t -> t != null).toList();
         assertThat(timestamps).isSorted();
     }
@@ -124,8 +125,8 @@ class SearchServiceIntegrationTest {
         // Range covers only dayB: the dayA backup file must be pruned entirely.
         SearchResult result = searchService.search(new SearchRequest(
                 projectId,
-                dayB.toLocalDate().atStartOfDay(),
-                dayB.toLocalDate().atTime(23, 59),
+                dayB.toLocalDate().atStartOfDay().toInstant(ZoneOffset.UTC),
+                dayB.toLocalDate().atTime(23, 59).toInstant(ZoneOffset.UTC),
                 Map.of(), "", 0, 0));
 
         assertThat(result.lines()).extracting(LogLine::raw)
@@ -138,8 +139,8 @@ class SearchServiceIntegrationTest {
     void exactTokenFilterMatchesOneLine() {
         SearchResult result = searchService.search(new SearchRequest(
                 projectId,
-                dayA.toLocalDate().atStartOfDay(),
-                LocalDateTime.now().plusDays(1),
+                dayA.toLocalDate().atStartOfDay().toInstant(ZoneOffset.UTC),
+                LocalDateTime.now().plusDays(1).toInstant(ZoneOffset.UTC),
                 Map.of("tid", "old2"), "", 0, 0));
 
         assertThat(result.lines()).hasSize(1);
@@ -151,8 +152,8 @@ class SearchServiceIntegrationTest {
     void freeTextFilterIsCaseInsensitive() {
         SearchResult result = searchService.search(new SearchRequest(
                 projectId,
-                dayA.toLocalDate().atStartOfDay(),
-                LocalDateTime.now().plusDays(1),
+                dayA.toLocalDate().atStartOfDay().toInstant(ZoneOffset.UTC),
+                LocalDateTime.now().plusDays(1).toInstant(ZoneOffset.UTC),
                 Map.of(), "PAYMENT", 0, 0));
 
         assertThat(result.lines()).hasSize(1);
@@ -175,8 +176,8 @@ class SearchServiceIntegrationTest {
 
         SearchResult result = searchService.search(new SearchRequest(
                 projectId,
-                dayA.toLocalDate().atStartOfDay(),
-                LocalDateTime.now().plusDays(1),
+                dayA.toLocalDate().atStartOfDay().toInstant(ZoneOffset.UTC),
+                LocalDateTime.now().plusDays(1).toInstant(ZoneOffset.UTC),
                 Map.of(), "", 0, 0));
 
         assertThat(result.lines()).extracting(LogLine::fileLabel)
@@ -203,8 +204,8 @@ class SearchServiceIntegrationTest {
 
         SearchResult result = searchService.search(new SearchRequest(
                 projectId,
-                dayA.toLocalDate().atStartOfDay(),
-                LocalDateTime.now().plusDays(1),
+                dayA.toLocalDate().atStartOfDay().toInstant(ZoneOffset.UTC),
+                LocalDateTime.now().plusDays(1).toInstant(ZoneOffset.UTC),
                 Map.of("tid", "old1"), "", 0, 0));
 
         assertThat(result.unreachableNodes()).containsExactly("ghost");

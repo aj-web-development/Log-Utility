@@ -5,5 +5,6 @@ public record LinePatternResponse(
         String timestampPattern,
         String timestampRegexOrPosition,
         String levelPattern,
-        String loggerPattern) {
+        String loggerPattern,
+        String timeZone) {
 }

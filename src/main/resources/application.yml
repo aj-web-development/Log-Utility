@@ -16,11 +16,16 @@ spring:
   flyway:
     enabled: true
     # Portable baseline in .../common runs on every SQL database; the {vendor} placeholder
-    # is resolved by Flyway to the running engine (h2, postgresql, mysql, oracle, sqlserver,
-    # ...), so database-specific override scripts can be dropped into db/migration/<vendor>
-    # with no code change. Missing vendor folders are ignored (fail-on-missing-locations is
+    # is resolved by Flyway to the running engine (h2, postgresql, mysql, sqlserver, ...),
+    # so database-specific override scripts can be dropped into db/migration/<vendor> with
+    # no code change. Missing vendor folders are ignored (fail-on-missing-locations is
     # false by default in Spring Boot).
     locations: classpath:db/migration/common,classpath:db/migration/{vendor}
+    placeholders:
+      # SQL type used for datetime columns in the common migrations (see V1__init.sql).
+      # Correct as-is for Postgres/MySQL/H2; overridden in application-prod.yml per
+      # deployment since SQL Server needs DATETIME2 (bare TIMESTAMP means rowversion there).
+      timestampType: TIMESTAMP
 
 # Log-search engine tuning, consumed by the search pipeline.
 search:
@@ -37,6 +42,10 @@ search:
   chunk-size: 200
   # How long an SSE connection (GET /api/search/stream) may stay open before it's forced closed.
   sse-timeout-millis: 60000
+
+logging:
+  level:
+    com.app.logutility: info
 
 management:
   endpoints:

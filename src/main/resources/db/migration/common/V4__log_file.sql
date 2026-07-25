@@ -8,7 +8,7 @@ CREATE TABLE log_file (
     live_log_path       VARCHAR(1000),
     backup_root_path    VARCHAR(1000),
     backup_path_pattern VARCHAR(1000),
-    last_checked_at     TIMESTAMP,
+    last_checked_at     ${timestampType},
     last_check_status   VARCHAR(20)   NOT NULL DEFAULT 'UNKNOWN',
     last_check_message  VARCHAR(1000),
     CONSTRAINT pk_log_file PRIMARY KEY (id),

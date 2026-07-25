@@ -74,9 +74,9 @@
 
 		<!-- Flyway. In Spring Boot 4 auto-configuration is modularized, so flyway-core alone
 		     does NOT self-configure; the spring-boot-flyway module supplies the auto-config
-		     (and pulls flyway-core transitively). flyway-core bundles H2 support (dev); the
-		     postgresql module is required for the production database. There is no separate
-		     flyway-database-h2 artifact. -->
+		     (and pulls flyway-core transitively). flyway-core bundles H2 support (dev); each
+		     other target database needs its own flyway-database-<db>/flyway-<db> module. There
+		     is no separate flyway-database-h2 artifact. -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-flyway</artifactId>
@@ -85,11 +85,32 @@
 			<groupId>org.flywaydb</groupId>
 			<artifactId>flyway-database-postgresql</artifactId>
 		</dependency>
+		<dependency>
+			<groupId>org.flywaydb</groupId>
+			<artifactId>flyway-mysql</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>org.flywaydb</groupId>
+			<artifactId>flyway-sqlserver</artifactId>
+		</dependency>
 
-		<!-- Databases: Postgres for prod, H2 (PostgreSQL mode) for the dev profile. -->
+		<!-- Databases: which one is actually used at runtime is decided entirely by
+		     spring.datasource.url (see JDBC_DATABASE_URL) - Spring Boot picks the matching
+		     driver from the URL prefix, so all four drivers can coexist on the classpath.
+		     H2 (PostgreSQL mode) is used by the dev profile. -->
 		<dependency>
 			<groupId>org.postgresql</groupId>
 			<artifactId>postgresql</artifactId>
+			<scope>runtime</scope>
+		</dependency>
+		<dependency>
+			<groupId>com.mysql</groupId>
+			<artifactId>mysql-connector-j</artifactId>
+			<scope>runtime</scope>
+		</dependency>
+		<dependency>
+			<groupId>com.microsoft.sqlserver</groupId>
+			<artifactId>mssql-jdbc</artifactId>
 			<scope>runtime</scope>
 		</dependency>
 		<dependency>

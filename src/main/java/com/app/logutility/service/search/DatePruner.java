@@ -6,6 +6,7 @@ import org.springframework.util.StringUtils;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
@@ -35,7 +36,8 @@ public class DatePruner {
         this.clock = searchClock;
     }
 
-    public ScanPlan plan(String backupRootPattern, String backupPathPattern, LocalDateTime from, LocalDateTime to) {
+    public ScanPlan plan(String backupRootPattern, String backupPathPattern, LocalDateTime from, LocalDateTime to,
+                         ZoneId zone) {
         List<String> globs = new ArrayList<>();
 
         if (StringUtils.hasText(backupPathPattern) && !from.isAfter(to)) {
@@ -50,8 +52,9 @@ public class DatePruner {
         }
 
         // The live file holds the most recent (un-rotated) entries; include it whenever the range
-        // reaches into today or later.
-        LocalDateTime startOfToday = LocalDate.now(clock).atStartOfDay();
+        // reaches into today or later. "Today" must be computed in the same zone as from/to (the
+        // project's configured zone), not the server's — otherwise this drifts whenever they differ.
+        LocalDateTime startOfToday = LocalDate.now(clock.withZone(zone)).atStartOfDay();
         boolean includeLive = !to.isBefore(startOfToday);
 
         return new ScanPlan(globs, includeLive);

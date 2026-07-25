@@ -20,6 +20,7 @@ import org.springframework.web.context.WebApplicationContext;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.Map;
 import java.util.UUID;
@@ -110,8 +111,8 @@ class SearchApiControllerTest {
 
         Map<String, Object> body = Map.of(
                 "projectId", projectId.toString(),
-                "from", now.minusHours(1).format(DateTimeFormatter.ISO_LOCAL_DATE_TIME),
-                "to", now.plusHours(1).format(DateTimeFormatter.ISO_LOCAL_DATE_TIME),
+                "from", now.minusHours(1).toInstant(ZoneOffset.UTC).toString(),
+                "to", now.plusHours(1).toInstant(ZoneOffset.UTC).toString(),
                 "filters", Map.of("tid", "api123"),
                 "page", 0,
                 "pageSize", 50);

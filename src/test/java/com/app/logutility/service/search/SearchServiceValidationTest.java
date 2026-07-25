@@ -9,7 +9,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.TestPropertySource;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.Semaphore;
@@ -43,8 +44,8 @@ class SearchServiceValidationTest {
     @Test
     void rejectsADateRangeLargerThanTheConfiguredMaximum() {
         UUID projectId = createProject();
-        LocalDateTime to = LocalDateTime.now();
-        LocalDateTime from = to.minusDays(5); // max is 1 day
+        Instant to = Instant.now();
+        Instant from = to.minus(5, ChronoUnit.DAYS); // max is 1 day
 
         assertThatThrownBy(() -> searchService.search(new SearchRequest(
                 projectId, from, to, Map.of(), "", 0, 0)))
@@ -55,8 +56,8 @@ class SearchServiceValidationTest {
     @Test
     void rejectsAFromThatIsAfterTo() {
         UUID projectId = createProject();
-        LocalDateTime to = LocalDateTime.now();
-        LocalDateTime from = to.plusHours(1);
+        Instant to = Instant.now();
+        Instant from = to.plus(1, ChronoUnit.HOURS);
 
         assertThatThrownBy(() -> searchService.search(new SearchRequest(
                 projectId, from, to, Map.of(), "", 0, 0)))
@@ -70,7 +71,7 @@ class SearchServiceValidationTest {
         searchConcurrencyGate.acquire(); // the single permit (max-concurrent-searches=1) is now held
         try {
             assertThatThrownBy(() -> searchService.search(new SearchRequest(
-                    projectId, LocalDateTime.now().minusHours(1), LocalDateTime.now(), Map.of(), "", 0, 0)))
+                    projectId, Instant.now().minus(1, ChronoUnit.HOURS), Instant.now(), Map.of(), "", 0, 0)))
                     .isInstanceOf(SearchOverloadedException.class);
         } finally {
             searchConcurrencyGate.release();

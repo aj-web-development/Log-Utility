@@ -16,6 +16,7 @@ public class LinePatternForm implements Serializable {
     private String timestampRegexOrPosition;
     private String levelPattern;
     private String loggerPattern;
+    private String timeZone;
 
     /** Whether any field has content worth persisting as a {@code LinePattern}. */
     public boolean hasAnyContent() {

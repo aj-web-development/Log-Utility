@@ -43,7 +43,9 @@
       "Bash(node check_search.js)",
       "Bash(node test_view_mode.js)",
       "Bash(node test_instrument.js)",
-      "Bash(curl -s http://localhost:8080/ -o /tmp/current_page.html)"
+      "Bash(curl -s http://localhost:8080/ -o /tmp/current_page.html)",
+      "Bash(awk '/<build>/,/<\\\\/build>/' pom.xml)",
+      "Bash(npm view *)"
     ]
   }
 }

@@ -4,6 +4,13 @@ target/
 !**/src/main/**/target/
 !**/src/test/**/target/
 
+### Deployment (docker-compose.yml / docs/DEPLOYMENT.md) ###
+# Holds real DB/admin credentials per environment - never commit, only .env.example is checked in.
+.env
+
+# Rolling app/error logs written by the prod profile - see logback-spring.xml.
+logs/
+
 ### STS ###
 .apt_generated
 .classpath

@@ -14,6 +14,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
@@ -61,8 +62,8 @@ class SearchServiceCapTest {
 
         SearchResult result = searchService.search(new SearchRequest(
                 projectId,
-                base.minusHours(1),
-                LocalDateTime.now().plusDays(1),
+                base.minusHours(1).toInstant(ZoneOffset.UTC),
+                LocalDateTime.now().plusDays(1).toInstant(ZoneOffset.UTC),
                 Map.of(), "hit", 0, 0));
 
         assertThat(result.truncated()).isTrue();

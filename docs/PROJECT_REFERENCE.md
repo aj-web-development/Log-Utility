@@ -178,7 +178,7 @@ Project (name UNIQUE, description, createdAt, updatedAt)
  │       └─ 1:N LogFile (fileLabel, liveLogPath, backupRootPath, backupPathPattern,
  │                       lastCheckedAt, lastCheckStatus [REACHABLE|UNREACHABLE|UNKNOWN], lastCheckMessage)
  ├─ 1:N FilterField (field_key, label, mdcKey, matchType [EXACT_TOKEN|SUBSTRING|REGEX], linePrefix)
- └─ 1:1 LinePattern (timestampPattern, timestampRegexOrPosition, levelPattern, loggerPattern)
+ └─ 1:1 LinePattern (timestampPattern, timestampRegexOrPosition, levelPattern, loggerPattern, zoneId)
 ```
 
 - `Project.addLogSource`/`addFilterField`/`setLinePattern` are the only mutators that should be
@@ -324,13 +324,22 @@ thread per (`LogSource`, `LogFile`) pair** via `Executors.newVirtualThreadPerTas
    project's nodes, each node's log files, filter fields, and line pattern fully — force-hydrating
    every lazy collection — before the async fan-out starts, so the long-running scan never touches
    an open Hibernate session from a virtual thread.
-2. `SearchServiceImpl.prepare(request)` resolves defaults (`to` = now if absent, `from` = `to` − 1
-   day if absent), validates the range (`from` ≤ `to`, span ≤ `search.max-date-range-days`,
-   `IllegalArgumentException` otherwise), builds one `LogLineParser` for the whole search
-   (`LogLineParserFactory.create`, formatter/regex compiled once) and one combined
-   `Predicate<String>` from every non-blank filter value (`buildPredicate` — AND-ed across fields;
-   an invalid user-supplied regex value becomes a predicate that matches nothing, not a thrown
-   exception) plus free text (case-insensitive substring, `Locale.ROOT`).
+2. `SearchServiceImpl.prepare(request)` resolves the project's zone (`resolveZone` — parses
+   `LinePattern.zoneId` via `ZoneId.of(...)`, falling back to `UTC` if unset, blank, or invalid),
+   resolves `from`/`to` defaults as **instants** (`to` = `clock.instant()` if absent, `from` = `to`
+   − 1 day if absent — `SearchRequest.from`/`to` are absolute instants, not wall-clock values), then
+   converts both through the resolved zone into the `LocalDateTime`s the rest of the pipeline
+   compares against raw log digits in (`LocalDateTime.ofInstant(instant, zone)`). Validates the
+   range (`from` ≤ `to`, span ≤ `search.max-date-range-days`, `IllegalArgumentException` otherwise),
+   builds one `LogLineParser` for the whole search (`LogLineParserFactory.create`, formatter/regex
+   compiled once) and one combined `Predicate<String>` from every non-blank filter value
+   (`buildPredicate` — AND-ed across fields; an invalid user-supplied regex value becomes a
+   predicate that matches nothing, not a thrown exception) plus free text (case-insensitive
+   substring, `Locale.ROOT`). The resolved zone is carried in `SearchContext` and used again when
+   each matched line is turned into a `LogLine`: its parsed wall-clock `LocalDateTime` is converted
+   back to an `Instant` (`ts.atZone(zone).toInstant()`) before being sent to the client, so
+   `LogLine.timestamp` — like `SearchRequest.from`/`to` — is always an absolute instant, never a
+   naive value whose zone the caller has to guess.
 3. **`acquireGate()`** — tries the process-wide `Semaphore` (`search.max-concurrent-searches`,
    bean in `SearchConfig`); if saturated, throws `SearchOverloadedException` (→ HTTP 429 for the
    API, an inline banner for the UI) instead of queuing.
@@ -343,8 +352,13 @@ thread per (`LogSource`, `LogFile`) pair** via `Executors.newVirtualThreadPerTas
    - **`DatePruner.plan(...)`** expands `{date}` per calendar day in the requested range (assumes
      `yyyy-MM-dd` folder format — documented, not configurable per-project) and turns
      `{HH}`/`{i}`/anything else into `*` globs, all without touching the filesystem; also decides
-     whether the live file should be read at all (only if the range reaches into today or later,
-     via an injectable `Clock` for testability).
+     whether the live file should be read at all (only if the range reaches into today or later).
+     "Today" is computed via `clock.withZone(zone)` — the injectable `Clock` (`SearchConfig`, for
+     testability) re-zoned to the **project's** configured zone (`ctx.zone()`, from
+     `SearchServiceImpl.prepare`), not the server's own system zone — `from`/`to` are already
+     expressed in the project's zone by this point, so comparing them against a "today" computed in
+     a different zone would silently mis-include/exclude the live file whenever the two zones
+     disagree (see §9.3's `zoneId`).
    - **`GlobFileResolver.resolve(baseDir, glob)`** walks the glob one path segment at a time via
      `Files.newDirectoryStream` — portable across Windows/Unix, unlike a whole-path `glob:`
      `PathMatcher`.
@@ -376,7 +390,7 @@ thread per (`LogSource`, `LogFile`) pair** via `Executors.newVirtualThreadPerTas
      side knows this producer is done.
 5. **`StreamingResultMerger.merge(producers, maxResults, onResult, onTruncated)`** — a bounded
    k-way merge: a `PriorityQueue` holding at most one peeked item per producer, ordered by
-   timestamp (nulls sort last via `LocalDateTime.MAX`). Repeatedly polls the earliest item, emits
+   timestamp (nulls sort last via `Instant.MAX`). Repeatedly polls the earliest item, emits
    it, and refills from that same producer — never materializes the whole result set. This runs on
    the **calling thread** (the one that invoked `search()`/`searchStreaming()`), driving the
    producer virtual threads via their queues. Once `maxResults` is emitted, `onTruncated` fires and
@@ -447,7 +461,12 @@ fast-reject stays cheap even across the many lines it must skip. **Gotcha:** `pa
 skips era resolution, so a `"yyyy"` pattern token resolves to `ChronoField.YEAR_OF_ERA`, not
 `YEAR` (`"uuuu"` would give `YEAR`) — reading only `ChronoField.YEAR` silently fails for the
 overwhelmingly common `yyyy-MM-dd` pattern. `DefaultLogLineParser.toLocalDateTime` checks `YEAR`
-then falls back to `YEAR_OF_ERA`.
+then falls back to `YEAR_OF_ERA`. Any zone/offset token the pattern captures (e.g. a trailing `Z`
+or `XXX`) is parsed but **ignored** — the returned `LocalDateTime` is always just the line's raw
+wall-clock digits. The zone that actually applies is `LinePattern.zoneId` (a separate,
+admin-configured field, since a log line's own offset suffix can't be trusted),
+resolved once per search in `SearchServiceImpl.prepare`/`resolveZone` and used to convert both the
+incoming search range and each result's timestamp, never inside the parser itself.
 
 ### 9.4 `SampleLineAnalyzerImpl`
 
@@ -542,22 +561,26 @@ directory at build/dev time — it's gitignored, never hand-edited.
   showing `progress` events while running, and finalizing on `done`. Export is a plain
   `<a href="/api/search/export?...">` link, not a fetch/blob download, since the backend already
   sets `Content-Disposition: attachment`.
-- **Timestamp handling** (`features/search/logLine.ts`) ports the old Thymeleaf page's exact
-  behavior: `LogLine.timestamp` is a wall-clock `LocalDateTime` with no zone (`DefaultLogLineParser`
-  parses the digits but discards any printed offset), always treated as UTC and converted to the
-  viewer's local time (`new Date(iso + "Z")`) regardless of what offset the raw line prints after
-  it — real projects have shown a misconfigured/static offset suffix that doesn't describe the zone
-  the digits were actually written in, so honoring it selectively produced worse results than
-  uniformly assuming UTC. `summaryLine()` strips that same leading timestamp + the entry's own
-  level token from the collapsed card's preview line (mirrors `DefaultLogLineParser.level()`'s
-  first-match-anywhere search) — the full `raw` text is always still shown in full once a card is
-  expanded.
+- **Timestamp handling** (`features/search/logLine.ts`) is zone-safe end to end. `LogLine.timestamp`
+  is an absolute instant (ISO with `Z`) — the backend has already converted the log's raw wall-clock
+  digits (`DefaultLogLineParser` parses the digits but discards any printed offset — see §9.3) through
+  that project's configured `LinePattern.zoneId` before sending it. `formatLocalTimestamp` just
+  renders that instant in the viewer's own local time (`new Date(isoInstant)`), no assumption
+  involved. Search input runs the same conversion in reverse: `toBackendDateTime` reads the
+  `datetime-local` input as the viewer's local time (native `Date` parsing) and sends the resulting
+  instant as `SearchRequest.from`/`to` — the browser only needs to get its own zone right; the
+  per-project zone conversion happens once, server-side, in `SearchServiceImpl.prepare`. This
+  replaced an earlier version that sent/received naive digits with a hardcoded "assume UTC"
+  behavior, which broke as soon as a project's `zoneId` wasn't actually UTC. `summaryLine()` strips
+  that same leading timestamp + the entry's own level token from the collapsed card's preview line
+  (mirrors `DefaultLogLineParser.level()`'s first-match-anywhere search) — the full `raw` text is
+  always still shown in full once a card is expanded.
 - **Level filtering is client-side only** (`levelBucket()`/`enabledLevels`) — `SearchRequest` has
   no server-side level parameter; toggling a level chip filters whatever's already been fetched,
   same as `MatchType`-driven field filters are the closest thing to a server concept of it.
   "Quick range" pills (5m/15m/1h/...) are pure client-side convenience that compute and fill in
   explicit `from`/`to` values — there's no relative-range concept on the backend, `SearchRequest`
-  only ever takes absolute timestamps.
+  only ever takes absolute instants.
 - **No separate Cards/Stream view-mode toggle or group-by** (both real features of the old
   Thymeleaf page) — the current design has one card-list layout; density (comfortable/compact,
   `localStorage` key `loguty.density`) is the only layout lever ported over. Add view-mode/group-by
@@ -574,7 +597,12 @@ via `wizardStateFromDetail(ProjectDetailResponse)`). `wizardStateToRequest()` co
 node holds a list of log files, added/removed independently at both levels (`steps/NodesStep.tsx`);
 its "Test paths" button calls the real `POST /api/projects/path-check`, not a placeholder. A "line
 pattern" step exists as its own step (prefilled from the sample-line step's `analyze` call) since
-`LinePatternRequest` is real, required data the original design reference never asked for at all.
+`LinePatternRequest` is real, required data the original design reference never asked for at all —
+it also carries `timeZone` (free-text IANA zone id, e.g. `UTC`/`Asia/Kolkata`; defaults to `UTC` in
+`emptyWizardState()`), the zone the pasted sample line's raw timestamp digits are actually written
+in, validated server-side in `ProjectWizardValidation.validateLinePattern` (`ZoneId.of(...)` must
+not throw). `SampleLineStep`'s `analyze()` call only refreshes the timestamp/level/logger
+suggestions — it spreads the existing `linePattern` first so an already-set `timeZone` survives.
 The upload page (`_shell.admin.projects.upload.tsx`) hands its parsed `LogbackParseResult` to the
 `new` route through an in-memory handoff (`wizardPrefill.ts` — a module-level variable, since it's
 always the same same-tab SPA navigation, nothing needs to survive a reload) instead of a session
@@ -626,28 +654,44 @@ reachable by more than one trusted admin.
 
 ## 12. Database & migrations
 
+Postgres, MySQL, and SQL Server drivers + Flyway modules (`flyway-database-postgresql`,
+`flyway-mysql`, `flyway-sqlserver`) all ship on the classpath; which engine is used is decided
+purely by `JDBC_DATABASE_URL`'s scheme at boot (Spring Boot picks the matching driver from the URL
+prefix), no rebuild needed. See [docs/DEPLOYMENT.md](DEPLOYMENT.md) for the full deploy walkthrough.
+
 Flyway locations: `classpath:db/migration/common,classpath:db/migration/{vendor}`
 (`application.yml`). `common/` is the portable baseline (every SQL database); `{vendor}` resolves to
-whichever engine is actually running — `postgresql/` (prod) and `h2/` (dev) both exist as vendor
-overrides.
+whichever engine is actually running — `h2/` (dev) and `sqlserver/` both exist as vendor override
+folders; Postgres/MySQL need no overrides beyond the placeholder below.
+
+Datetime columns in `common/` use the `${timestampType}` Flyway placeholder
+(`spring.flyway.placeholders.timestampType` in `application.yml`, defaulting to `TIMESTAMP`) rather
+than a literal `TIMESTAMP`, because on SQL Server the bare word `TIMESTAMP` is a legacy `rowversion`
+alias, not a date/time type — using the same version number in both `common/` and a `sqlserver/`
+override isn't an option here anyway, since Flyway errors on two migrations sharing one version
+number across locations. `application-prod.yml` re-exposes the placeholder as `FLYWAY_TIMESTAMP_TYPE`
+(set to `DATETIME2` for SQL Server deployments).
 
 | Migration | Contents |
 |---|---|
 | `common/V1__init.sql` | `project`, `log_source`, `filter_field`, `line_pattern` tables |
 | `common/V2__indexes.sql` | Supporting indexes |
+| `sqlserver/V3__drop_log_source_last_check_status_default.sql` | SQL Server only. `V1`'s `last_check_status ... DEFAULT 'UNKNOWN'` makes SQL Server auto-create a named DEFAULT constraint (Postgres/MySQL/H2 don't need this — they drop a column's default along with the column). `V4` (below) drops that column, which SQL Server refuses while the constraint still references it (error 4922); this looks the constraint up by its server-generated name via `sys.default_constraints` and drops it first. Runs at version 3 specifically so it lands *before* `V4` — see below for why that slot was free. |
 | `common/V4__log_file.sql` | Adds `log_file` table (the node → per-output split, §5); migrates each existing `log_source`'s single live/backup/pattern config into a `log_file` row labeled `"Application"`, reusing the `log_source` row's own id as the new `log_file` id (safe — different table's PK space); then drops those columns from `log_source`. |
-| `h2/V5__dev_seed_project.sql` | Dev-only convenience data: since it lives under the `h2` vendor location it only ever runs against the in-memory H2 dev database, never prod. Seeds one ready-to-search project ("360 API": one node/log-file, a `tid`/"Trace ID" `EXACT_TOKEN` filter field, and a `LinePattern` derived the same way the wizard's "analyze sample line" step would) so a fresh `mvnw spring-boot:run` has something to search immediately. |
+| `common/V4_1__line_pattern_time_zone.sql` | Adds `line_pattern.time_zone VARCHAR(64) NOT NULL DEFAULT 'UTC'` (§8/§9.3's per-project search-zone conversion). Versioned `4.1` (Flyway's underscore-as-decimal convention), deliberately between `V4` and the H2-only `V5` below, because `V5`'s seed data inserts an explicit `time_zone` value and would fail if it ran before the column existed. |
+| `h2/V5__dev_seed_project.sql` | Dev-only convenience data: since it lives under the `h2` vendor location it only ever runs against the in-memory H2 dev database, never prod. Seeds one ready-to-search project ("360 API": one node/log-file, a `tid`/"Trace ID" `EXACT_TOKEN` filter field, and a `LinePattern` derived the same way the wizard's "analyze sample line" step would, `time_zone = 'Asia/Kolkata'` matching the seed sample line's `+0530` offset) so a fresh `mvnw spring-boot:run` has something to search immediately — including exercising the non-UTC zone path, not just the default. |
 
-(There is no `V3` — it used to hold Spring Session JDBC's tables, removed along with the Thymeleaf
-UI that needed sessions; the version number is left as a gap rather than renumbered, since Flyway
-doesn't require contiguous versions and renumbering an already-applied migration on any real
-deployment would break its checksum validation.)
+(`common/` has no `V3` — it used to hold Spring Session JDBC's tables, removed along with the
+Thymeleaf UI that needed sessions; the version number was left as a gap rather than renumbered,
+since Flyway doesn't require contiguous versions and renumbering an already-applied migration on
+any real deployment would break its checksum validation. `sqlserver/V3` above reuses that same
+global version number — safe, since no database ever actually recorded a `V3` — but only in the
+`sqlserver` vendor location; `common/` still skips straight from `V2` to `V4`.)
 
-**To add support for another database** (MySQL, Oracle, SQL Server): add its JDBC driver +
-`flyway-database-<db>` module to `pom.xml`, point `spring.datasource.*` at it, and add
-`db/migration/<db>/Vn__*.sql` for anything vendor-specific. **Known gap:** SQL Server's `TIMESTAMP`
-type means "rowversion," not a date/time column — a SQL Server target needs
-`db/migration/sqlserver/` using `DATETIME2` instead.
+**To add support for a database beyond Postgres/MySQL/SQL Server/H2** (Oracle, ...): add its JDBC
+driver + `flyway-database-<db>`/`flyway-<db>` module to `pom.xml`, point `spring.datasource.*` at
+it, and add `db/migration/<db>/Vn__*.sql` for anything vendor-specific beyond what a placeholder can
+express.
 
 ## 13. Configuration reference
 
@@ -662,7 +706,8 @@ type means "rowversion," not a date/time column — a SQL Server target needs
 | `search.max-concurrent-searches` | `SearchProperties` | 8 | See §8.1 |
 | `search.chunk-size` | `SearchProperties` | 200 | See §8.1 |
 | `search.sse-timeout-millis` | `SearchProperties` | 60000 | See §8.1 |
-| `JDBC_DATABASE_URL` / `_USERNAME` / `_PASSWORD` | `application-prod.yml` | localhost Postgres | Prod datasource |
+| `JDBC_DATABASE_URL` / `_USERNAME` / `_PASSWORD` | `application-prod.yml` | localhost Postgres | Prod datasource — scheme picks Postgres/MySQL/SQL Server |
+| `FLYWAY_TIMESTAMP_TYPE` | `application-prod.yml` | `TIMESTAMP` | `DATETIME2` for SQL Server, see §12 |
 | `SPRING_PROFILES_ACTIVE` | Spring Boot | `dev` | Must be `prod` in production |
 | `management.endpoints.web.exposure.include` | `application.yml` | `health,info` | Actuator endpoints exposed |
 

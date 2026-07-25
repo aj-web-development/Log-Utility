@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Prod-readiness config, kept close to Spring Boot's own defaults
+  (org/springframework/boot/logging/logback/*.xml) and to Boot's own recognized
+  logging.logback.rollingpolicy.* properties rather than reinventing them:
+   - dev: console only, human-readable, no disk footprint.
+   - every other profile (prod): console + a rolling app log + a rolling error-only log
+     (for ops to tail/alert on without grepping the full stream), each capped in size and
+     retention so a busy instance can never fill the disk. Both file appenders are wrapped
+     in AsyncAppender so slow disk I/O never blocks a request/search thread; discardingThreshold
+     is 0 so nothing is silently dropped under burst - the appender blocks instead, which is the
+     right tradeoff at this app's log volume (one summary line per search/admin action, not
+     per log line). DefaultShutdownHook drains the async queue on JVM shutdown.
+   - every log line carries tid=%X{traceId}, set per-request by TraceIdFilter
+     (config.logging), so concurrent requests - this app runs up to search.max-concurrent-searches
+     searches at once - can be told apart in the shared log file/console.
+  logging.level.* in application*.yml still controls per-logger levels on top of this file -
+  that binding is applied by Spring Boot's LoggingSystem independently of this config.
+-->
+<configuration>
+
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+
+    <springProperty scope="context" name="LOG_FILE" source="logging.file.name"
+                     defaultValue="logs/logutility.log"/>
+    <springProperty scope="context" name="ROOT_LOG_LEVEL" source="logging.level.root"
+                     defaultValue="INFO"/>
+
+    <!-- Boot's own rolling-policy properties (documented, no custom key needed) for the main
+         app log; the error-only log below reuses MAX_FILE_SIZE but keeps its own, longer
+         retention under a loguty.logging.* key since Boot has no second file to tune. -->
+    <springProperty scope="context" name="MAX_FILE_SIZE"
+                     source="logging.logback.rollingpolicy.max-file-size" defaultValue="50MB"/>
+    <springProperty scope="context" name="MAX_HISTORY"
+                     source="logging.logback.rollingpolicy.max-history" defaultValue="30"/>
+    <springProperty scope="context" name="TOTAL_SIZE_CAP"
+                     source="logging.logback.rollingpolicy.total-size-cap" defaultValue="2GB"/>
+    <springProperty scope="context" name="ERROR_LOG_FILE"
+                     source="loguty.logging.error-file" defaultValue="logs/logutility-error.log"/>
+    <springProperty scope="context" name="ERROR_MAX_HISTORY"
+                     source="loguty.logging.error-max-history" defaultValue="90"/>
+    <springProperty scope="context" name="ERROR_TOTAL_SIZE_CAP"
+                     source="loguty.logging.error-total-size-cap" defaultValue="1GB"/>
+    <!-- false = buffered writes (better throughput); true = flush to disk after every log event
+         (useful for live-tailing/debugging in an incident, small perf cost under high volume). -->
+    <springProperty scope="context" name="IMMEDIATE_FLUSH"
+                     source="loguty.logging.immediate-flush" defaultValue="true"/>
+
+    <property name="LOG_PATTERN"
+              value="%d{yyyy-MM-dd HH:mm:ss.SSS} %5p [%15.15t] tid=%X{traceId} %-40.40logger{39} : %m%n%wEx"/>
+    <property name="CONSOLE_LOG_PATTERN"
+              value="%clr(%d{yyyy-MM-dd HH:mm:ss.SSS}){faint} %clr(%5p) %clr([%15.15t]){faint} %clr(tid=%X{traceId}){faint} %clr(%-40.40logger{39}){cyan} %clr(:){faint} %m%n%wEx"/>
+    <property name="FILE_LOG_PATTERN" value="${LOG_PATTERN}"/>
+
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>${CONSOLE_LOG_PATTERN}</pattern>
+            <charset>${CONSOLE_LOG_CHARSET}</charset>
+        </encoder>
+    </appender>
+
+    <springProfile name="dev">
+        <root level="${ROOT_LOG_LEVEL}">
+            <appender-ref ref="CONSOLE"/>
+        </root>
+    </springProfile>
+
+    <springProfile name="!dev">
+        <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+            <encoder>
+                <pattern>${FILE_LOG_PATTERN}</pattern>
+                <charset>${FILE_LOG_CHARSET}</charset>
+            </encoder>
+            <file>${LOG_FILE}</file>
+            <immediateFlush>${IMMEDIATE_FLUSH}</immediateFlush>
+            <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+                <fileNamePattern>${LOG_FILE}.%d{yyyy-MM-dd}.%i.gz</fileNamePattern>
+                <maxFileSize>${MAX_FILE_SIZE}</maxFileSize>
+                <maxHistory>${MAX_HISTORY}</maxHistory>
+                <totalSizeCap>${TOTAL_SIZE_CAP}</totalSizeCap>
+            </rollingPolicy>
+        </appender>
+
+        <appender name="ERROR_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+            <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+                <level>ERROR</level>
+            </filter>
+            <encoder>
+                <pattern>${FILE_LOG_PATTERN}</pattern>
+                <charset>${FILE_LOG_CHARSET}</charset>
+            </encoder>
+            <file>${ERROR_LOG_FILE}</file>
+            <immediateFlush>${IMMEDIATE_FLUSH}</immediateFlush>
+            <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+                <fileNamePattern>${ERROR_LOG_FILE}.%d{yyyy-MM-dd}.%i.gz</fileNamePattern>
+                <maxFileSize>${MAX_FILE_SIZE}</maxFileSize>
+                <maxHistory>${ERROR_MAX_HISTORY}</maxHistory>
+                <totalSizeCap>${ERROR_TOTAL_SIZE_CAP}</totalSizeCap>
+            </rollingPolicy>
+        </appender>
+
+        <!-- IO is offloaded to these background threads; queueSize covers a burst of concurrent
+             searches without blocking their request threads. -->
+        <appender name="ASYNC_FILE" class="ch.qos.logback.classic.AsyncAppender">
+            <appender-ref ref="FILE"/>
+            <queueSize>1024</queueSize>
+            <discardingThreshold>0</discardingThreshold>
+            <includeCallerData>false</includeCallerData>
+        </appender>
+
+        <appender name="ASYNC_ERROR_FILE" class="ch.qos.logback.classic.AsyncAppender">
+            <appender-ref ref="ERROR_FILE"/>
+            <queueSize>512</queueSize>
+            <discardingThreshold>0</discardingThreshold>
+            <includeCallerData>false</includeCallerData>
+        </appender>
+
+        <root level="${ROOT_LOG_LEVEL}">
+            <appender-ref ref="CONSOLE"/>
+            <appender-ref ref="ASYNC_FILE"/>
+            <appender-ref ref="ASYNC_ERROR_FILE"/>
+        </root>
+    </springProfile>
+
+    <!-- Drains the async appenders' queues on JVM shutdown so in-flight log events aren't lost. -->
+    <shutdownHook class="ch.qos.logback.core.hook.DefaultShutdownHook">
+        <delay>2000</delay>
+    </shutdownHook>
+
+</configuration>
