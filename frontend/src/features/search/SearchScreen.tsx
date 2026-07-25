@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type UIEvent } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { AlertTriangle, ChevronRight, Download, Loader2, Play, RefreshCw, Search as SearchIcon, X } from "lucide-react";
+import { AlertTriangle, ChevronRight, Download, Loader2, Play, RefreshCw, Search as SearchIcon, SlidersHorizontal, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { DateTimeField } from "@/components/ui/datetime-field";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { ApiRequestError, searchApi } from "@/lib/api";
@@ -29,6 +30,9 @@ export function SearchScreen() {
     queryFn: () => searchApi.project(activeId as string),
     enabled: !!activeId,
   });
+  // Falls back to UTC while the project's still loading - matches the backend's own default
+  // (LinePattern.resolveZoneId) so the two can never briefly disagree about what "From"/"To" mean.
+  const zoneId = fields?.zoneId ?? "UTC";
 
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -86,8 +90,8 @@ export function SearchScreen() {
 
   function pickRange(label: string, ms: number) {
     const now = new Date();
-    setTo(toDatetimeLocal(now));
-    setFrom(toDatetimeLocal(new Date(now.getTime() - ms)));
+    setTo(toDatetimeLocal(now, zoneId));
+    setFrom(toDatetimeLocal(new Date(now.getTime() - ms), zoneId));
     setQuickRange(label);
   }
 
@@ -114,8 +118,8 @@ export function SearchScreen() {
     try {
       const body: SearchRequest = {
         projectId: activeId,
-        from: toBackendDateTime(from) ?? null,
-        to: toBackendDateTime(to) ?? null,
+        from: toBackendDateTime(from, zoneId) ?? null,
+        to: toBackendDateTime(to, zoneId) ?? null,
         filters: activeFilters(),
         freeText: freeText.trim() || null,
         page: targetPage,
@@ -144,8 +148,8 @@ export function SearchScreen() {
 
     const url = searchApi.streamUrl({
       projectId: activeId,
-      from: toBackendDateTime(from),
-      to: toBackendDateTime(to),
+      from: toBackendDateTime(from, zoneId),
+      to: toBackendDateTime(to, zoneId),
       freeText: freeText.trim() || undefined,
       filters: activeFilters(),
     });
@@ -200,7 +204,7 @@ export function SearchScreen() {
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3 p-3 sm:p-6">
       <div className="rounded-2xl border bg-card shadow-card">
-        <div className="flex flex-wrap items-center gap-2 p-3">
+        <div className="flex flex-col gap-2 p-3 sm:flex-row sm:flex-wrap sm:items-center">
           <div className="relative min-w-0 flex-1">
             <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -211,60 +215,58 @@ export function SearchScreen() {
               className="h-10 border-transparent bg-muted/40 pl-9 font-mono text-sm focus-visible:bg-background focus-visible:border-ring"
             />
           </div>
-          <div className="flex items-center gap-1 rounded-lg bg-muted/40 p-1">
-            {QUICK_RANGES.map((r) => (
-              <button
-                key={r.label}
-                onClick={() => pickRange(r.label, r.ms)}
-                className={cn(
-                  "rounded-md px-2.5 py-1 font-mono text-xs transition-colors",
-                  quickRange === r.label ? "bg-primary text-primary-foreground shadow-glow" : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                {r.label}
-              </button>
-            ))}
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-1 rounded-lg bg-muted/40 p-1">
+              {QUICK_RANGES.map((r) => (
+                <button
+                  key={r.label}
+                  onClick={() => pickRange(r.label, r.ms)}
+                  className={cn(
+                    "rounded-md px-2.5 py-1 font-mono text-xs transition-colors",
+                    quickRange === r.label ? "bg-primary text-primary-foreground shadow-glow" : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {r.label}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-1.5 rounded-lg bg-muted/40 px-2 py-1.5 text-xs text-muted-foreground">
+              <span>Live</span>
+              <Switch checked={live} onCheckedChange={setLive} />
+            </div>
+            <Button variant="ghost" size="icon" className="h-9 w-9" aria-label="Toggle filters" onClick={() => setFiltersOpen((v) => !v)}>
+              <SlidersHorizontal className={cn("h-4 w-4 transition-transform", filtersOpen && "text-primary")} />
+            </Button>
+            <Button className="h-9 gap-1.5 gradient-signal font-medium text-primary-foreground shadow-glow hover:opacity-90" onClick={run} disabled={!activeId || isBusy}>
+              {isBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" fill="currentColor" />}
+              Run
+            </Button>
           </div>
-          <div className="flex items-center gap-1.5 rounded-lg bg-muted/40 px-2 py-1.5 text-xs text-muted-foreground">
-            <span>Live</span>
-            <Switch checked={live} onCheckedChange={setLive} />
-          </div>
-          <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => setFiltersOpen((v) => !v)}>
-            <SearchIcon className={cn("h-4 w-4 transition-transform", filtersOpen && "text-primary")} />
-          </Button>
-          <Button className="h-9 gap-1.5 gradient-signal font-medium text-primary-foreground shadow-glow hover:opacity-90" onClick={run} disabled={!activeId || isBusy}>
-            {isBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" fill="currentColor" />}
-            Run
-          </Button>
         </div>
 
         <div className={cn("grid border-t transition-[grid-template-rows] duration-300 ease-in-out", filtersOpen ? "grid-rows-[1fr]" : "grid-rows-[0fr]")}>
           <div className="overflow-hidden">
             <div className="space-y-2.5 px-3 py-2.5">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-[11px] uppercase tracking-widest text-muted-foreground">When</span>
+                <span className="text-[11px] uppercase tracking-widest text-muted-foreground">When ({zoneId})</span>
                 <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
                   From
-                  <Input
-                    type="datetime-local"
+                  <DateTimeField
                     value={from}
-                    onChange={(e) => {
-                      setFrom(e.target.value);
+                    onChange={(v) => {
+                      setFrom(v);
                       setQuickRange(null);
                     }}
-                    className="h-8 w-auto text-xs"
                   />
                 </label>
                 <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
                   To
-                  <Input
-                    type="datetime-local"
+                  <DateTimeField
                     value={to}
-                    onChange={(e) => {
-                      setTo(e.target.value);
+                    onChange={(v) => {
+                      setTo(v);
                       setQuickRange(null);
                     }}
-                    className="h-8 w-auto text-xs"
                   />
                 </label>
               </div>
@@ -357,13 +359,13 @@ export function SearchScreen() {
             )}
             {activeId && (result || liveLines.length > 0) && (
               <a
-                href={searchApi.exportUrl({ projectId: activeId, from: toBackendDateTime(from), to: toBackendDateTime(to), freeText: freeText.trim() || undefined, filters: activeFilters() })}
+                href={searchApi.exportUrl({ projectId: activeId, from: toBackendDateTime(from, zoneId), to: toBackendDateTime(to, zoneId), freeText: freeText.trim() || undefined, filters: activeFilters() })}
                 className="inline-flex h-7 items-center gap-1 rounded px-2 text-muted-foreground hover:text-foreground"
               >
                 <Download className="h-3.5 w-3.5" /> Export
               </a>
             )}
-            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={run} disabled={!activeId || isBusy}>
+            <Button variant="ghost" size="icon" className="h-7 w-7" aria-label="Re-run search" onClick={run} disabled={!activeId || isBusy}>
               <RefreshCw className={cn("h-3.5 w-3.5", isBusy && "animate-spin")} />
             </Button>
           </div>
@@ -388,7 +390,7 @@ export function SearchScreen() {
               <div key={cardKey} className="group border-b border-border/40 transition-colors hover:bg-accent/30">
                 <button onClick={() => setExpanded(isOpen ? null : cardKey)} className={cn("flex w-full items-start gap-3 px-4 text-left", pad)}>
                   <ChevronRight className={cn("mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform", isOpen && "rotate-90 text-primary")} />
-                  <span className="w-[150px] shrink-0 tabular-nums text-muted-foreground">{formatLocalTimestamp(log.timestamp)}</span>
+                  <span className="w-[172px] shrink-0 whitespace-nowrap tabular-nums text-muted-foreground">{formatLocalTimestamp(log.timestamp)}</span>
                   <span className={cn("w-14 shrink-0 rounded px-1.5 py-0.5 text-center text-[10.5px] font-semibold tracking-wider", bucket ? LEVEL_CLASS[bucket] : "bg-muted text-muted-foreground")}>
                     {log.level ?? "—"}
                   </span>

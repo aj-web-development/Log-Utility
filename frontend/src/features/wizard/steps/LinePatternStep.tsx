@@ -2,6 +2,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { WizardState } from "../types";
 import { StepHeader } from "./StepHeader";
+import { TimeZoneCombobox } from "./TimeZoneCombobox";
 
 type SetState = (fn: (s: WizardState) => WizardState) => void;
 
@@ -17,9 +18,9 @@ export function LinePatternStep({ state, setState }: { state: WizardState; setSt
         subtitle="How to recognize a new log entry vs. a continuation line (stack trace, wrapped message). Prefilled from the sample line's analysis - override anything that's wrong."
       />
       <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="Timestamp pattern" value={state.linePattern.timestampPattern} onChange={(v) => set("timestampPattern", v)} placeholder="yyyy-MM-dd HH:mm:ss.SSS" />
+        <Field label="Timestamp pattern *" value={state.linePattern.timestampPattern} onChange={(v) => set("timestampPattern", v)} placeholder="yyyy-MM-dd HH:mm:ss.SSS" />
         <Field
-          label="Timestamp regex/position"
+          label="Timestamp regex/position *"
           value={state.linePattern.timestampRegexOrPosition}
           onChange={(v) => set("timestampRegexOrPosition", v)}
           placeholder={String.raw`^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}`}
@@ -36,6 +37,10 @@ export function LinePatternStep({ state, setState }: { state: WizardState; setSt
           onChange={(v) => set("loggerPattern", v)}
           placeholder={String.raw`[a-zA-Z_$][\w$]*(\.[a-zA-Z_$][\w$]*)+`}
         />
+        <div className="space-y-1.5">
+          <Label className="text-xs">Time zone</Label>
+          <TimeZoneCombobox value={state.linePattern.timeZone} onChange={(v) => set("timeZone", v)} />
+        </div>
       </div>
     </div>
   );

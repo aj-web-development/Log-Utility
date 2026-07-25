@@ -51,7 +51,7 @@ export function emptyWizardState(): WizardState {
     description: "",
     nodes: [emptyNode()],
     fields: [],
-    linePattern: { timestampPattern: "", timestampRegexOrPosition: "", levelPattern: "", loggerPattern: "" },
+    linePattern: { timestampPattern: "", timestampRegexOrPosition: "", levelPattern: "", loggerPattern: "", timeZone: "UTC" },
     sampleLine: "",
   };
 }
@@ -80,9 +80,27 @@ export function wizardStateFromDetail(detail: ProjectDetailResponse): WizardStat
         }))
       : [emptyNode()],
     fields: detail.filterFields.map((f) => ({ ...f, _key: newKey() })),
-    linePattern: detail.linePattern ?? { timestampPattern: "", timestampRegexOrPosition: "", levelPattern: "", loggerPattern: "" },
+    linePattern: detail.linePattern ?? { timestampPattern: "", timestampRegexOrPosition: "", levelPattern: "", loggerPattern: "", timeZone: "UTC" },
     sampleLine: "",
   };
+}
+
+export type WizardStepKey = "details" | "nodes" | "sample" | "pattern" | "fields" | "review";
+
+export function isStepComplete(state: WizardState, step: WizardStepKey): boolean {
+  switch (step) {
+    case "details":
+      return state.name.trim() !== "";
+    case "nodes":
+      return state.nodes.some((n) => n.nodeLabel.trim() !== "" && n.logFiles.some((f) => f.liveLogPath.trim() !== ""));
+    case "pattern":
+      return state.linePattern.timestampPattern.trim() !== "" && state.linePattern.timestampRegexOrPosition.trim() !== "";
+    case "sample":
+    case "fields":
+      return true;
+    case "review":
+      return isStepComplete(state, "details") && isStepComplete(state, "nodes") && isStepComplete(state, "pattern");
+  }
 }
 
 export function wizardStateToRequest(state: WizardState): ProjectRequest {

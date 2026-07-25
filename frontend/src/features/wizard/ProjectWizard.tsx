@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 import { ApiRequestError, projectApi } from "@/lib/api";
 import type { ProjectDetailResponse, ProjectRequest } from "@/lib/types";
 import { consumeWizardPrefill } from "./wizardPrefill";
-import { emptyWizardState, newKey, wizardStateFromDetail, wizardStateToRequest, type WizardField, type WizardState } from "./types";
+import { emptyWizardState, isStepComplete, newKey, wizardStateFromDetail, wizardStateToRequest, type WizardField, type WizardState } from "./types";
 import { DetailsStep } from "./steps/DetailsStep";
 import { NodesStep } from "./steps/NodesStep";
 import { SampleLineStep } from "./steps/SampleLineStep";
@@ -24,6 +24,15 @@ const STEPS = [
   { key: "review", label: "Review" },
 ] as const;
 type StepKey = (typeof STEPS)[number]["key"];
+
+const STEP_REQUIREMENT: Record<StepKey, string> = {
+  details: "Name is required.",
+  nodes: "At least one node needs a label, with one log file's live path filled in.",
+  sample: "",
+  pattern: "Timestamp pattern and timestamp regex/position are required.",
+  fields: "",
+  review: "Go back and complete the earlier steps first.",
+};
 
 function applyUploadPrefill(state: WizardState): WizardState {
   const prefill = consumeWizardPrefill();
@@ -75,6 +84,10 @@ export function ProjectWizard(props: ProjectWizardProps) {
   const next = () => setStep(STEPS[Math.min(idx + 1, STEPS.length - 1)].key);
   const prev = () => setStep(STEPS[Math.max(idx - 1, 0)].key);
 
+  const firstIncompleteIdx = STEPS.findIndex((s) => !isStepComplete(state, s.key));
+  const maxReachableIdx = firstIncompleteIdx === -1 ? STEPS.length - 1 : firstIncompleteIdx;
+  const currentValid = isStepComplete(state, step);
+
   async function submit() {
     setSubmitting(true);
     setSubmitError(null);
@@ -108,11 +121,17 @@ export function ProjectWizard(props: ProjectWizardProps) {
       <div className="relative rounded-2xl border bg-card p-4 shadow-card">
         <ol className="grid grid-cols-3 gap-2 sm:grid-cols-6">
           {STEPS.map((s, i) => {
-            const done = i < idx;
+            const done = i !== idx && isStepComplete(state, s.key);
             const current = i === idx;
+            const reachable = i <= maxReachableIdx;
             return (
               <li key={s.key} className="flex flex-col items-center gap-1">
-                <button type="button" onClick={() => setStep(s.key)} className="flex w-full items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => reachable && setStep(s.key)}
+                  disabled={!reachable}
+                  className={cn("flex w-full items-center gap-2", !reachable && "cursor-not-allowed opacity-40")}
+                >
                   <div
                     className={cn(
                       "grid h-7 w-7 shrink-0 place-items-center rounded-full text-[11px] font-semibold transition-all",
@@ -146,17 +165,18 @@ export function ProjectWizard(props: ProjectWizardProps) {
       </div>
 
       {submitError && <div className="rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive">{submitError}</div>}
+      {!currentValid && STEP_REQUIREMENT[step] && <div className="text-xs text-muted-foreground">{STEP_REQUIREMENT[step]}</div>}
 
       <div className="flex items-center justify-between">
         <Button variant="ghost" onClick={prev} disabled={idx === 0}>
           <ArrowLeft className="mr-1 h-4 w-4" /> Back
         </Button>
         {idx < STEPS.length - 1 ? (
-          <Button onClick={next} className="gradient-signal font-medium text-primary-foreground shadow-glow hover:opacity-90">
+          <Button onClick={next} disabled={!currentValid} className="gradient-signal font-medium text-primary-foreground shadow-glow hover:opacity-90 disabled:opacity-40">
             Continue <ArrowRight className="ml-1 h-4 w-4" />
           </Button>
         ) : (
-          <Button onClick={submit} disabled={submitting} className="gradient-signal font-medium text-primary-foreground shadow-glow hover:opacity-90">
+          <Button onClick={submit} disabled={submitting || !currentValid} className="gradient-signal font-medium text-primary-foreground shadow-glow hover:opacity-90 disabled:opacity-40">
             <Check className="mr-1 h-4 w-4" /> {props.mode === "edit" ? "Save changes" : "Create project"}
           </Button>
         )}

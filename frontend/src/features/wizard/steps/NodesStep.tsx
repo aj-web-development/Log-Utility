@@ -16,7 +16,7 @@ export function NodesStep({ state, setState }: { state: WizardState; setState: S
     <div className="space-y-6">
       <StepHeader
         title="Nodes"
-        subtitle="Each node can write more than one log output (app.log, error.log, ...). List every live path and its backup/rotation pattern, then test."
+        subtitle="Each node can write more than one log output (app.log, error.log, ...). List every live path and its backup/rotation pattern, then test. At least one node needs a label and a live path to continue."
       />
       {state.nodes.map((node, ni) => (
         <div key={node._key} className="space-y-3 rounded-xl border bg-background p-3">

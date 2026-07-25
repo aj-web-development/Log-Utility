@@ -12,7 +12,7 @@ export function DetailsStep({ state, setState }: { state: WizardState; setState:
       <StepHeader title="Project details" subtitle="Give the project a name and a one-line description." />
       <div className="space-y-1.5">
         <Label htmlFor="wizard-name" className="text-xs">
-          Name
+          Name <span className="text-destructive">*</span>
         </Label>
         <Input id="wizard-name" value={state.name} onChange={(e) => setState((s) => ({ ...s, name: e.target.value }))} className="font-mono" />
       </div>
