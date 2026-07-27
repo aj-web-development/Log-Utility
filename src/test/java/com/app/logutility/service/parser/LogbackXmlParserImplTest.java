@@ -111,6 +111,79 @@ class LogbackXmlParserImplTest {
     }
 
     @Test
+    void resolvesPlainPropertyElementsNotJustSpringProperty() {
+        // Regression test: a bare <property> (Logback's own mechanism, not the Spring Boot
+        // extension) must resolve too, or ${LOG_PATH} is left as literal text.
+        String xml = """
+                <configuration>
+                    <property name="LOG_PATH" value="/var/log/orders"/>
+                    <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+                        <file>${LOG_PATH}/app.log</file>
+                        <rollingPolicy>
+                            <fileNamePattern>${LOG_PATH}/archive/app.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+                        </rollingPolicy>
+                        <encoder><pattern>%msg%n</pattern></encoder>
+                    </appender>
+                </configuration>
+                """;
+
+        LogbackParseResult result = parser.parse(xml);
+
+        assertThat(result.liveLogPathHint()).isEqualTo("/var/log/orders/app.log");
+        assertThat(result.backupPathPattern()).isEqualTo("app.{date}.{i}.log.gz");
+        assertThat(result.backupRootHint()).isEqualTo("/var/log/orders/archive/");
+    }
+
+    @Test
+    void variableNestedInsideDateTokenResolvesCleanlyWhenPropertyIsDefined() {
+        // Regression test for the exact real-world pattern that motivated this fix: Logback's
+        // "mark auxiliary %d tokens with aux" convention (%d{${DATE_PATTERN},aux}) puts a ${...}
+        // substitution var *inside* the %d{...} braces.
+        String xml = """
+                <configuration>
+                    <property name="LOGS_FILE_NAME" value="uniserve-360-api"/>
+                    <property name="DATE_PATTERN" value="yyyy-MM-dd"/>
+                    <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+                        <file>/logs/uniserve-web/${LOGS_FILE_NAME}.log</file>
+                        <rollingPolicy>
+                            <fileNamePattern>/logs/uniserve-web/${LOGS_FILE_NAME}-logs-backup/%d{${DATE_PATTERN},aux}/${LOGS_FILE_NAME}.%d{HH}.%i.log.gz</fileNamePattern>
+                        </rollingPolicy>
+                        <encoder><pattern>%msg%n</pattern></encoder>
+                    </appender>
+                </configuration>
+                """;
+
+        LogbackParseResult result = parser.parse(xml);
+
+        assertThat(result.backupPathPattern()).isEqualTo("{date}/uniserve-360-api.{HH}.{i}.log.gz");
+        assertThat(result.backupRootHint()).isEqualTo("/logs/uniserve-web/uniserve-360-api-logs-backup/");
+    }
+
+    @Test
+    void unresolvedVariableInsideDateTokenDoesNotCorruptTrailingLiteralText() {
+        // Even if DATE_PATTERN is never defined anywhere in the file (e.g. it's only ever
+        // supplied as a JVM system property, invisible to this offline XML parse), the embedded
+        // '}' from the literal, unresolved "${DATE_PATTERN}" text must not prematurely close the
+        // %d{...} match and leak ",aux}" into the text before the next token.
+        String xml = """
+                <configuration>
+                    <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+                        <file>/logs/uniserve-web/uniserve-360-api.log</file>
+                        <rollingPolicy>
+                            <fileNamePattern>/logs/uniserve-web-logs-backup/%d{${DATE_PATTERN},aux}/uniserve-360-api.%d{HH}.%i.log.gz</fileNamePattern>
+                        </rollingPolicy>
+                        <encoder><pattern>%msg%n</pattern></encoder>
+                    </appender>
+                </configuration>
+                """;
+
+        LogbackParseResult result = parser.parse(xml);
+
+        assertThat(result.backupPathPattern()).isEqualTo("{date}/uniserve-360-api.{HH}.{i}.log.gz");
+        assertThat(result.backupRootHint()).isEqualTo("/logs/uniserve-web-logs-backup/");
+    }
+
+    @Test
     void handlesMultipleAppendersUsingFirstFileNamePattern() {
         String xml = """
                 <configuration>

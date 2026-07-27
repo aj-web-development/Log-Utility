@@ -30,7 +30,10 @@ public class LogbackXmlParserImpl implements LogbackXmlParser {
     private static final Pattern MDC_TOKEN = Pattern.compile("%X\\{([^}:]+)(?::-[^}]*)?\\}");
     // A literal "word=" (or "word.sub-part=") immediately preceding an %X token, e.g. tid=%X{traceId}.
     private static final Pattern LINE_PREFIX_BEFORE = Pattern.compile("([A-Za-z0-9_.-]+=)$");
-    private static final Pattern DATE_TOKEN = Pattern.compile("%d\\{([^}]*)\\}");
+    // Inner content is either brace-free text or one nested {...} pair (e.g. an unresolved
+    // ${VAR} left over from substitute()) - otherwise that nested '}' prematurely closes the
+    // match and corrupts everything up to the next %d/%i token.
+    private static final Pattern DATE_TOKEN = Pattern.compile("%d\\{((?:[^{}]|\\{[^{}]*\\})*)\\}");
     private static final Pattern INDEX_TOKEN = Pattern.compile("%i\\b");
     private static final Pattern SPRING_VARIABLE = Pattern.compile("\\$\\{([^}]+)\\}");
 
@@ -94,23 +97,31 @@ public class LogbackXmlParserImpl implements LogbackXmlParser {
         return StringUtils.hasText(text) ? text.trim() : null;
     }
 
-    // ------------------------------------------------------------------ springProperty / substitution
+    // ------------------------------------------------------------------ property / substitution
 
+    /** Plain Logback {@code <property name="X" value="Y"/>} and Spring Boot's {@code <springProperty
+     * name="X" defaultValue="Y"/>} are both common ways to define {@code ${X}} substitution vars -
+     * read both into one map so either style resolves. */
     private static Map<String, String> extractSpringProperties(Document doc) {
         Map<String, String> properties = new LinkedHashMap<>();
-        NodeList nodes = doc.getElementsByTagName("springProperty");
-        for (int i = 0; i < nodes.getLength(); i++) {
-            Element el = (Element) nodes.item(i);
-            String name = el.getAttribute("name");
-            String defaultValue = el.getAttribute("defaultValue");
-            if (StringUtils.hasText(name) && StringUtils.hasText(defaultValue)) {
-                properties.put(name, defaultValue);
-            }
-        }
+        collectProperties(properties, doc, "property", "value");
+        collectProperties(properties, doc, "springProperty", "defaultValue");
         return properties;
     }
 
-    /** Best-effort {@code ${name}} substitution using springProperty defaults; leaves unresolved refs as-is. */
+    private static void collectProperties(Map<String, String> properties, Document doc, String tagName, String valueAttr) {
+        NodeList nodes = doc.getElementsByTagName(tagName);
+        for (int i = 0; i < nodes.getLength(); i++) {
+            Element el = (Element) nodes.item(i);
+            String name = el.getAttribute("name");
+            String value = el.getAttribute(valueAttr);
+            if (StringUtils.hasText(name) && StringUtils.hasText(value)) {
+                properties.put(name, value);
+            }
+        }
+    }
+
+    /** Best-effort {@code ${name}} substitution using property/springProperty values; leaves unresolved refs as-is. */
     private static String substitute(String raw, Map<String, String> properties) {
         Matcher matcher = SPRING_VARIABLE.matcher(raw);
         StringBuilder result = new StringBuilder();
