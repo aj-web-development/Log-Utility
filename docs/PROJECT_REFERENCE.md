@@ -78,16 +78,16 @@ integration actually activates (grep the boot log, or curl the endpoint) — nev
 ## 3. Build, run, test
 
 ```bash
-mvnw.cmd spring-boot:run              # dev profile (H2), default — http://localhost:8080
+mvnw.cmd spring-boot:run              # dev profile (H2), default — http://localhost:8080/logutility
 mvnw.cmd clean package                # builds frontend/ (npm ci && npm run build), then the executable jar → target/logutility-0.0.1-SNAPSHOT.jar
-mvnw.cmd clean package -Pwar21        # WAR for an external servlet container → target/logutility-java21.war
+mvnw.cmd clean package -Pwar21        # WAR for an external servlet container → target/logutility.war
 mvnw.cmd test                         # full suite (also builds frontend/ first - see the frontend-maven-plugin's generate-resources binding in pom.xml)
 mvnw.cmd test -Dtest=ClassName        # single test class
 mvnw.cmd test -Dtest=ClassName#method # single test method
 ```
 
 ```bash
-cd frontend && npm run dev            # Vite dev server (port 5173), proxies /api to localhost:8080 - run alongside `mvnw spring-boot:run`
+cd frontend && npm run dev            # Vite dev server (port 5173, itself served under /logutility/ too), proxies /logutility/api to localhost:8080 - run alongside `mvnw spring-boot:run`
 cd frontend && npm run build          # what the Maven build calls; writes straight into ../src/main/resources/static
 ```
 

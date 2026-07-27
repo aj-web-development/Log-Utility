@@ -262,7 +262,11 @@
 			</dependencies>
 
 			<build>
-				<finalName>${project.artifactId}-java21</finalName>
+				<!-- Default Tomcat deployment derives the context path from this file name, so
+				     keep it exactly "logutility" -> deploys at /logutility (see application.yml's
+				     server.servlet.context-path, which this profile's WAR does NOT honor - that
+				     property only applies to the embedded-container jar/Docker forms). -->
+				<finalName>logutility</finalName>
 
 				<plugins>
 					<plugin>

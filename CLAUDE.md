@@ -23,22 +23,31 @@ requires Node (auto-downloaded by the Maven build, not required on `PATH`).
 ```bash
 mvnw.cmd spring-boot:run          # run the backend (dev profile, in-memory H2, active by default)
 mvnw.cmd clean package            # builds frontend/ (npm ci && npm run build) THEN the executable jar -> target/logutility-0.0.1-SNAPSHOT.jar
-mvnw.cmd clean package -Pwar21    # traditional WAR -> target/logutility-java21.war (needs a JDK 21 toolchain entry in ~/.m2/toolchains.xml)
+mvnw.cmd clean package -Pwar21    # traditional WAR -> target/logutility.war (needs a JDK 21 toolchain entry in ~/.m2/toolchains.xml)
 mvnw.cmd test                     # full test suite (also runs the frontend build first, see generate-resources binding in pom.xml)
 mvnw.cmd test -Dtest=SearchServiceIntegrationTest        # single test class
 mvnw.cmd test -Dtest=SearchServiceIntegrationTest#methodName  # single test method
 ```
 
 For frontend-only iteration, `cd frontend && npm run dev` runs a Vite dev server (default port
-5173) that proxies `/api/**` to `http://localhost:8080` (see `frontend/vite.config.ts`) — run it
-alongside `mvnw spring-boot:run` instead of rebuilding the whole jar on every change.
+5173, itself served under `/logutility/` too — see `base` in `frontend/vite.config.ts`) that
+proxies `/logutility/api/**` to `http://localhost:8080` — run it alongside `mvnw spring-boot:run`
+instead of rebuilding the whole jar on every change.
 
-App runs at http://localhost:8080. Dev admin login is `admin`/`admin` (set in
+The whole app is served under a fixed **`/logutility`** context path
+(`server.servlet.context-path`, `application.yml`) in every deployment form — jar, Docker, and
+local `mvnw spring-boot:run` alike — matched on the frontend by Vite's `base` and the router's
+`basepath` (`frontend/src/main.tsx`), so build once, serve anywhere at the same path. The one
+exception is the `war21` traditional-WAR profile: an external servlet container decides the
+context path itself (from the deployed WAR's file name, normally), not from that Spring property —
+see [[logutility-context-path]] in memory and `docs/DEPLOYMENT.md` Option B.
+
+App runs at http://localhost:8080/logutility. Dev admin login is `admin`/`admin` (set in
 `application-dev.yml`, dev-profile only) — the React login page checks it by sending it as HTTP
 Basic against `/api/projects` and storing the header in `sessionStorage` on success (see
-[[spa-basic-auth-shortcut]] in memory). `/h2-console` browses the in-memory DB; `/actuator/health`
-is the liveness check; `/swagger-ui.html` and `/v3/api-docs` are the auto-generated REST API docs
-(springdoc).
+[[spa-basic-auth-shortcut]] in memory). `/logutility/h2-console` browses the in-memory DB;
+`/logutility/actuator/health` is the liveness check; `/logutility/swagger-ui.html` and
+`/logutility/v3/api-docs` are the auto-generated REST API docs (springdoc).
 
 Production: set `SPRING_PROFILES_ACTIVE=prod` and supply `JDBC_DATABASE_URL` /
 `JDBC_DATABASE_USERNAME` / `JDBC_DATABASE_PASSWORD` plus **`LOGUTY_ADMIN_USERNAME`** /

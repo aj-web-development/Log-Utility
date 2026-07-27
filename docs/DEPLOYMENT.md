@@ -97,11 +97,13 @@ docker compose up -d
 
 ```bash
 docker compose logs -f log-utility-app     # watch startup; confirm Flyway migrated successfully
-curl http://localhost:8585/actuator/health # host port from the "8585:8080" mapping in docker-compose.yml
+curl http://localhost:8585/logutility/actuator/health # host port from the "8585:8080" mapping in docker-compose.yml
 ```
 
-Then open `http://<host>:8585` in a browser, sign in at `/login` with the admin credentials from
-`.env`, and add your first project via the admin wizard.
+Then open `http://<host>:8585/logutility` in a browser, sign in at `/logutility/login` with the
+admin credentials from `.env`, and add your first project via the admin wizard. The app is served
+under the fixed `/logutility` context path in every deployment form — see `server.servlet.context-path`
+in `application.yml`.
 
 This app's own logs (as opposed to the target apps' logs it searches) go to console — captured by
 `docker compose logs` — plus a rolling app log and a rolling error-only log inside the container at
@@ -133,7 +135,7 @@ pull && up -d` a rollback.
 | Symptom | Likely cause |
 |---|---|
 | `docker compose pull` fails with "not found" or "unauthorized" | `IMAGE_NAME`/`IMAGE_TAG` in this target's `.env` doesn't match what was pushed, or `docker login` wasn't run on this machine for a private registry |
-| Container healthcheck failing / can't reach `/actuator/health` | Check `docker compose logs log-utility-app` — usually a datasource connection failure (wrong `JDBC_DATABASE_URL`/credentials, or DB not reachable from the container's network) |
+| Container healthcheck failing / can't reach `/logutility/actuator/health` | Check `docker compose logs log-utility-app` — usually a datasource connection failure (wrong `JDBC_DATABASE_URL`/credentials, or DB not reachable from the container's network) |
 | App starts but every "Test path" check fails in the wizard | `LOGS_HOST_ROOT` doesn't actually cover the path you entered, or the container's non-root user (uid 10001) lacks read permission on the host directory — see `ls -la` on the host path |
 | Container restarts in a loop right after `docker compose up` | Almost always a missing/blank required env var (`LOGUTY_ADMIN_*` or `JDBC_DATABASE_*`) — the app fails fast on those by design; check `docker compose logs log-utility-app` for the exact message |
 | SQL Server: columns come back as binary garbage / inserts fail | `FLYWAY_TIMESTAMP_TYPE` wasn't set to `DATETIME2` before the first startup — see the note in `application-prod.yml` |
@@ -192,23 +194,27 @@ anywhere.
    mvnw.cmd clean package -Pwar21      # Windows
    ```
 
-   Produces `target/logutility-java21.war`. This also runs the frontend build (Maven downloads its
+   Produces `target/logutility.war`. This also runs the frontend build (Maven downloads its
    own pinned Node automatically) and the full test suite unless you add `-DskipTests`. Embedded
    Tomcat is marked `provided` in this profile — the target container supplies it — but the
    Postgres/MySQL/SQL Server JDBC drivers are bundled inside the WAR's `WEB-INF/lib`, so you don't
    need to add driver jars to the container yourself.
 
-3. **Deploy at the servlet container's ROOT context — not a sub-path.** The React frontend was
-   built with root-relative asset and API paths (`/assets/...`, `/api/...`); deploying under any
-   other context path (e.g. Tomcat's default of using the WAR's filename, `/logutility-java21`)
-   breaks both asset loading and every API call. Rename the file before deploying:
+3. **Deploy as-is — no renaming.** The frontend's asset/API paths are all built relative to
+   `/logutility` (see `frontend/vite.config.ts`'s `base`), matching this app's fixed
+   `server.servlet.context-path`. A traditional WAR deployment doesn't honor that Spring property
+   though — the container derives the context path from the deployed file name instead — which is
+   exactly why the war21 profile's `finalName` is `logutility`: dropping the file in as-is already
+   deploys at `/logutility`.
 
    ```bash
-   cp target/logutility-java21.war /path/to/tomcat/webapps/ROOT.war
+   cp target/logutility.war /path/to/tomcat/webapps/logutility.war
    ```
 
-   (Remove any existing `webapps/ROOT` directory/`ROOT.war` first so Tomcat doesn't serve a stale
-   one alongside it.)
+   (Remove any existing `webapps/logutility` directory first so Tomcat doesn't serve a stale one
+   alongside it. If your container instead assigns context paths some other way — e.g. a
+   `context.xml` `path` attribute — point that at `/logutility` instead of relying on the file
+   name.)
 
 4. **Configure environment variables for the container process.** Tomcat inherits the OS
    environment of whatever started it, so set the variables from the table above however your
@@ -242,10 +248,10 @@ anywhere.
 5. **Start Tomcat and verify** — same checks as the Docker path:
 
    ```bash
-   curl http://localhost:8080/actuator/health
+   curl http://localhost:8080/logutility/actuator/health
    ```
 
-   Then sign in at `/login` and confirm the admin wizard can reach it.
+   Then sign in at `/logutility/login` and confirm the admin wizard can reach it.
 
 6. **Log/backup paths**: unlike the container path, there's no bind-mount step here — the servlet
    container process already runs directly on the host filesystem, so whatever `liveLogPath` /
@@ -257,7 +263,7 @@ anywhere.
 | Symptom | Likely cause |
 |---|---|
 | `mvn -Pwar21` fails with "Cannot find matching toolchain" | `~/.m2/toolchains.xml` missing/wrong `jdkHome` — step 1 |
-| WAR deploys but every page 404s except `/` | Deployed at a non-root context path — step 3 |
+| WAR deploys but every page 404s except `/logutility` | Deployed under the wrong context path — check the deployed file/app name matches `logutility` — step 3 |
 | `ClassNotFoundException: javax.servlet...` or the app never starts | Container is Tomcat 9 or older — needs Tomcat 10.1+ (Jakarta EE) |
 | App starts but immediately shuts down | Missing/blank required env var — check `tomcat/logs/catalina.out` for the exact fail-fast message |
 

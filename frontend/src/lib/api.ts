@@ -23,6 +23,10 @@ export class ApiRequestError extends Error {
   }
 }
 
+// Matches Vite's `base` (vite.config.ts) / the router's basepath (main.tsx) - the backend lives
+// at the same sub-path (server.servlet.context-path) in every deployment form.
+const API_BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const needsAuth = path.startsWith("/api/projects");
   const headers = new Headers(init.headers);
@@ -35,11 +39,11 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     if (auth) headers.set("Authorization", auth);
   }
 
-  const res = await fetch(path, { ...init, headers });
+  const res = await fetch(API_BASE + path, { ...init, headers });
 
   if (res.status === 401 && needsAuth) {
     clearStoredAuth();
-    if (!location.pathname.startsWith("/login")) location.href = "/login";
+    if (!location.pathname.startsWith(`${API_BASE}/login`)) location.href = `${API_BASE}/login`;
   }
 
   if (!res.ok) {
@@ -86,8 +90,8 @@ export const searchApi = {
   projects: () => request<ProjectSummaryDto[]>("/api/search/projects"),
   project: (id: string) => request<PublicProjectView>(`/api/search/projects/${id}`),
   search: (body: SearchRequest) => request<SearchResult>("/api/search", { method: "POST", body: JSON.stringify(body) }),
-  streamUrl: (params: SearchStreamParams) => `/api/search/stream?${searchStreamQuery(params)}`,
-  exportUrl: (params: SearchStreamParams) => `/api/search/export?${searchStreamQuery(params)}`,
+  streamUrl: (params: SearchStreamParams) => `${API_BASE}/api/search/stream?${searchStreamQuery(params)}`,
+  exportUrl: (params: SearchStreamParams) => `${API_BASE}/api/search/export?${searchStreamQuery(params)}`,
 };
 
 export const projectApi = {

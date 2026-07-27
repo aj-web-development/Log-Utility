@@ -1,3 +1,11 @@
+server:
+  # Served under a fixed sub-path (not root) in every deployment form - jar, dev, Docker - so the
+  # frontend's asset/API paths and this all agree. Ignored for the war21 profile's traditional WAR:
+  # an external servlet container decides the context path from the deployed file/app name instead
+  # (see pom.xml's war21 <finalName> and docs/DEPLOYMENT.md Option B).
+  servlet:
+    context-path: /logutility
+
 spring:
   application:
     name: logutility

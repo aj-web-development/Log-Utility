@@ -44,16 +44,18 @@ in-memory H2 database and is active by default.
 mvnw.cmd spring-boot:run        # Windows
 ```
 
-The app starts on **http://localhost:8080**. Search is public immediately. To configure
-projects, sign in at **http://localhost:8080/login** with the throwaway dev credentials
-`admin` / `admin` (set in `application-dev.yml` — never used outside the dev profile).
+The app starts on **http://localhost:8080/logutility** (served under a fixed `/logutility`
+context path in every deployment form — see `server.servlet.context-path` in `application.yml`).
+Search is public immediately. To configure projects, sign in at
+**http://localhost:8080/logutility/login** with the throwaway dev credentials `admin` / `admin`
+(set in `application-dev.yml` — never used outside the dev profile).
 
 Other useful local endpoints:
 
 | Endpoint | Purpose |
 |---|---|
-| `/h2-console` | Browse the in-memory H2 database (dev profile only) |
-| `/actuator/health` | Liveness/readiness check |
+| `/logutility/h2-console` | Browse the in-memory H2 database (dev profile only) |
+| `/logutility/actuator/health` | Liveness/readiness check |
 
 The H2 schema is created fresh on every restart (in-memory), and Flyway applies the same
 migrations used in production, so schema issues surface locally too.
@@ -63,7 +65,7 @@ migrations used in production, so schema issues surface locally too.
 ```bash
 ./mvnw clean package             # builds frontend/ (npm ci && npm run build), then the executable jar: target/logutility-0.0.1-SNAPSHOT.jar
 ./mvnw clean package -Pwar21     # traditional WAR for an external servlet container:
-                                  #   target/logutility-java21.war
+                                  #   target/logutility.war
 ```
 
 The frontend build runs automatically as part of `mvnw clean package` (via

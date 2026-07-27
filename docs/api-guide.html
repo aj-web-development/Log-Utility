@@ -416,7 +416,7 @@
 <div class="shell">
   <aside class="side" id="side">
     <button class="navtoggle" id="navtoggle" type="button">☰ Contents</button>
-    <div class="brand"><span class="mark">Log Utility API</span><span class="ver">v1 · 2026-07-22</span></div>
+    <div class="brand"><span class="mark">Log Utility API</span><span class="ver">v1 · 2026-07-27</span></div>
     <div class="side-sub">Integration guide for UI teams</div>
 
     <div class="navgroup">
@@ -430,6 +430,8 @@
       <a class="navlink" href="#get-search-projects"><span class="tag tag-get">GET</span> /search/projects</a>
       <a class="navlink" href="#get-search-project"><span class="tag tag-get">GET</span> /search/projects/:id</a>
       <a class="navlink" href="#post-search"><span class="tag tag-post">POST</span> /search</a>
+      <a class="navlink" href="#get-search-stream"><span class="tag tag-get">GET</span> /search/stream</a>
+      <a class="navlink" href="#get-search-export"><span class="tag tag-get">GET</span> /search/export</a>
     </div>
 
     <div class="navgroup">
@@ -459,9 +461,9 @@
       <h1>Log Utility REST API</h1>
       <p class="lede">Everything the current admin wizard and search page can do is now available as JSON over HTTP, so any UI — this one or a new one — can configure projects and search their logs without touching the server-rendered pages.</p>
       <div class="hero-meta">
-        <span class="pill">Base URL <code>https://&lt;host&gt;</code></span>
-        <a class="pill link" href="#" onclick="return false;">Swagger UI → /swagger-ui.html</a>
-        <a class="pill link" href="#" onclick="return false;">OpenAPI spec → /v3/api-docs</a>
+        <span class="pill">Base URL <code>https://&lt;host&gt;/logutility</code></span>
+        <a class="pill link" href="#" onclick="return false;">Swagger UI → /logutility/swagger-ui.html</a>
+        <a class="pill link" href="#" onclick="return false;">OpenAPI spec → /logutility/v3/api-docs</a>
       </div>
     </div>
 
@@ -495,7 +497,12 @@
 
       <div class="callout">
         <span class="icon">i</span>
-        <p>There is no version prefix (no <code class="mono">/v1/</code>) yet — treat the shapes on this page as the current contract. Every endpoint is also machine-readable at <code class="mono">/v3/api-docs</code>, which is the source of truth if this document and the server ever disagree.</p>
+        <p>There is no version prefix (no <code class="mono">/v1/</code>) yet — treat the shapes on this page as the current contract. Every endpoint is also machine-readable at <code class="mono">/logutility/v3/api-docs</code>, which is the source of truth if this document and the server ever disagree.</p>
+      </div>
+
+      <div class="callout warn">
+        <span class="icon">!</span>
+        <p>Every path on this page (<code class="field">/api/search/**</code>, <code class="field">/api/projects/**</code>) is relative to a fixed <code class="mono">/logutility</code> context path, in every deployment form — so <code class="mono">POST /api/search</code> is really <code class="mono">POST https://&lt;host&gt;/logutility/api/search</code>. This isn't optional or configurable per environment; bake it into your base URL once.</p>
       </div>
     </section>
 
@@ -581,7 +588,7 @@
       <div class="sec-head">
         <div class="eyebrow">Public · no auth</div>
         <h2>Search API</h2>
-        <p>The three calls behind the public search page: list projects, get one project's searchable fields, run a search.</p>
+        <p>The calls behind the public search page: list projects, get one project's searchable fields, then run a search — as one paginated batch, streamed live over SSE, or as a plain-text export.</p>
       </div>
 
       <div class="endpoint" id="get-search-projects">
@@ -630,9 +637,11 @@
   <span class="k">"fields"</span><span class="p">:</span> [
     { <span class="k">"key"</span><span class="p">:</span> <span class="s">"traceId"</span><span class="p">,</span> <span class="k">"label"</span><span class="p">:</span> <span class="s">"Trace ID"</span> },
     { <span class="k">"key"</span><span class="p">:</span> <span class="s">"sessionId"</span><span class="p">,</span> <span class="k">"label"</span><span class="p">:</span> <span class="s">"Session ID"</span> }
-  ]
+  ],
+  <span class="k">"zoneId"</span><span class="p">:</span> <span class="s">"Asia/Kolkata"</span>
 }</pre>
           </div>
+          <p><code class="field">zoneId</code> is the IANA zone this project's raw log timestamps are actually parsed/searched in — its line pattern's configured <code class="field">timeZone</code>, or <code class="mono">"UTC"</code> if the project has no line pattern at all, or a line pattern with a blank <code class="field">timeZone</code>. Interpret whatever "From"/"To" the admin picks in <em>this</em> zone before sending them to <code class="mono">POST /api/search</code>/<code class="mono">GET /api/search/stream</code>, not the browser's own zone, or an explicit date range can silently target the wrong window relative to what's actually on disk.</p>
           <div class="statuses">
             <span class="status-chip ok"><span class="code">200</span> found</span>
             <span class="status-chip warn"><span class="code">404</span> no such project</span>
@@ -656,7 +665,7 @@
                 <tr><td><code class="field">projectId</code></td><td class="mono">UUID</td><td><span class="req">required</span></td><td>&nbsp;</td></tr>
                 <tr><td><code class="field">page</code></td><td class="mono">int</td><td><span class="req">required</span></td><td>Zero-based. Must always be sent — see warning below.</td></tr>
                 <tr><td><code class="field">pageSize</code></td><td class="mono">int</td><td><span class="req">required</span></td><td>Must always be sent. <code class="mono">&le;0</code> means "all results up to the server cap".</td></tr>
-                <tr><td><code class="field">from</code></td><td class="mono">string</td><td><span class="opt">optional</span></td><td>ISO-8601 local date-time, e.g. <code class="mono">2026-07-22T00:00:00</code>. Omit for the server's default window.</td></tr>
+                <tr><td><code class="field">from</code></td><td class="mono">string</td><td><span class="opt">optional</span></td><td>Absolute instant, ISO-8601 with an offset/<code class="mono">Z</code> (it's a Java <code class="mono">Instant</code> field server-side) — e.g. <code class="mono">2026-07-22T00:00:00.000Z</code>. Omit for the server's default window. A bare local date-time with no offset fails to deserialize (<code class="mono">400</code>).</td></tr>
                 <tr><td><code class="field">to</code></td><td class="mono">string</td><td><span class="opt">optional</span></td><td>Same format as <code class="field">from</code>.</td></tr>
                 <tr><td><code class="field">filters</code></td><td class="mono">object</td><td><span class="opt">optional</span></td><td>Map of filter-field <code class="field">key</code> → value (from the project's public fields above). All given filters are AND-ed; blank values are ignored.</td></tr>
                 <tr><td><code class="field">freeText</code></td><td class="mono">string</td><td><span class="opt">optional</span></td><td>Case-insensitive substring match against the raw line.</td></tr>
@@ -673,14 +682,15 @@
             <div class="barlabel"><span>example request</span><button class="copybtn" onclick="copyCode(this)">Copy</button></div>
             <pre class="code">{
   <span class="k">"projectId"</span><span class="p">:</span> <span class="s">"3f2a1b3c-8b8e-4a9a-9f2b-1234567890ab"</span><span class="p">,</span>
-  <span class="k">"from"</span><span class="p">:</span> <span class="s">"2026-07-22T00:00:00"</span><span class="p">,</span>
-  <span class="k">"to"</span><span class="p">:</span> <span class="s">"2026-07-22T23:59:59"</span><span class="p">,</span>
+  <span class="k">"from"</span><span class="p">:</span> <span class="s">"2026-07-22T00:00:00.000Z"</span><span class="p">,</span>
+  <span class="k">"to"</span><span class="p">:</span> <span class="s">"2026-07-22T23:59:59.999Z"</span><span class="p">,</span>
   <span class="k">"filters"</span><span class="p">:</span> { <span class="k">"traceId"</span><span class="p">:</span> <span class="s">"web123"</span> },
   <span class="k">"freeText"</span><span class="p">:</span> <span class="s">"timeout"</span><span class="p">,</span>
   <span class="k">"page"</span><span class="p">:</span> <span class="n">0</span><span class="p">,</span>
   <span class="k">"pageSize"</span><span class="p">:</span> <span class="n">50</span>
 }</pre>
           </div>
+          <p>These are absolute instants, not the project's local wall-clock digits — if the admin picks "2026-07-22 00:00" and the project's <code class="field">zoneId</code> (from <code class="mono">GET /api/search/projects/{id}</code>) is <code class="mono">Asia/Kolkata</code> (UTC+5:30), send <code class="mono">"2026-07-21T18:30:00.000Z"</code>, not the naive local string.</p>
 
           <h4>Response · 200</h4>
           <div class="codebox">
@@ -689,7 +699,8 @@
   <span class="k">"lines"</span><span class="p">:</span> [
     {
       <span class="k">"nodeLabel"</span><span class="p">:</span> <span class="s">"node-1"</span><span class="p">,</span>
-      <span class="k">"timestamp"</span><span class="p">:</span> <span class="s">"2026-07-22T10:14:02.331"</span><span class="p">,</span>
+      <span class="k">"fileLabel"</span><span class="p">:</span> <span class="s">"Application"</span><span class="p">,</span>
+      <span class="k">"timestamp"</span><span class="p">:</span> <span class="s">"2026-07-22T04:44:02.331Z"</span><span class="p">,</span>
       <span class="k">"level"</span><span class="p">:</span> <span class="s">"ERROR"</span><span class="p">,</span>
       <span class="k">"raw"</span><span class="p">:</span> <span class="s">"2026-07-22 10:14:02.331 ERROR tid=web123 payment timeout"</span>
     }
@@ -701,7 +712,8 @@
 }</pre>
           </div>
           <ul class="plain">
-            <li><code class="field">timestamp</code>/<code class="field">level</code> on a line can be <code class="mono">null</code> — the line still matched (e.g. on free text), it just couldn't be parsed by the project's line pattern.</li>
+            <li><code class="field">fileLabel</code> is which of that node's labeled log outputs the line came from (e.g. <code class="mono">"Application"</code> vs <code class="mono">"Error"</code>) — a node can write more than one, each configured as its own row under that node (see the Project API's <code class="field">logFiles</code> below).</li>
+            <li><code class="field">timestamp</code> is an absolute instant (converted through the project's configured zone), and — like <code class="field">level</code> — can be <code class="mono">null</code> on a line that still matched (e.g. on free text) but couldn't be parsed by the project's line pattern.</li>
             <li><code class="field">truncated: true</code> means the server-side cap (currently 5000 matches) was hit; there may be more matches than shown. Page through with <code class="field">page</code>, or narrow the time range/filters.</li>
             <li><code class="field">unreachableNodes</code> lists node labels that couldn't be scanned (e.g. a mounted path was down) — the search still ran against everything reachable rather than failing outright. Worth surfacing as a soft warning, not an error.</li>
           </ul>
@@ -709,6 +721,69 @@
             <span class="status-chip ok"><span class="code">200</span> ok</span>
             <span class="status-chip warn"><span class="code">400</span> missing projectId / malformed body</span>
             <span class="status-chip warn"><span class="code">404</span> projectId doesn't exist</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="endpoint" id="get-search-stream">
+        <div class="ep-head">
+          <span class="method get">GET</span>
+          <span class="ep-path"><span class="p">/api/search/</span>stream</span>
+          <span class="authbadge pub">PUBLIC</span>
+        </div>
+        <div class="ep-body">
+          <p>Same search as <code class="mono">POST /api/search</code>, but streamed over Server-Sent Events instead of paginated — matched lines arrive in chronological order as soon as they're found instead of waiting for the whole (possibly large, possibly slow) result set. This is what the search page's "Live" toggle uses, via the browser's native <code class="mono">EventSource</code> — which is exactly why this is a <code class="mono">GET</code> with query parameters rather than a <code class="mono">POST</code> with a body: <code class="mono">EventSource</code> can't send one.</p>
+          <h4>Query parameters</h4>
+          <div class="tblwrap">
+            <table>
+              <thead><tr><th>Param</th><th>Type</th><th></th><th>Notes</th></tr></thead>
+              <tbody>
+                <tr><td><code class="field">projectId</code></td><td class="mono">UUID</td><td><span class="req">required</span></td><td>&nbsp;</td></tr>
+                <tr><td><code class="field">from</code></td><td class="mono">string</td><td><span class="opt">optional</span></td><td>Same absolute-instant format as <code class="field">POST /api/search</code>'s body field.</td></tr>
+                <tr><td><code class="field">to</code></td><td class="mono">string</td><td><span class="opt">optional</span></td><td>&nbsp;</td></tr>
+                <tr><td><code class="field">freeText</code></td><td class="mono">string</td><td><span class="opt">optional</span></td><td>&nbsp;</td></tr>
+                <tr><td><code class="field">filter_&lt;key&gt;</code></td><td class="mono">string</td><td><span class="opt">optional</span></td><td>One query param per active filter field, e.g. <code class="mono">filter_traceId=web123</code> — there's no nested/JSON way to send filters over a plain <code class="mono">GET</code>. Blank values are ignored.</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p>There's no <code class="field">page</code>/<code class="field">pageSize</code> here — a streaming consumer already receives every matched line as it arrives, so pagination doesn't apply.</p>
+          <div class="codebox">
+            <div class="barlabel"><span>example URL</span><button class="copybtn" onclick="copyCode(this)">Copy</button></div>
+            <pre class="code">GET /logutility/api/search/stream?projectId=3f2a1b3c-8b8e-4a9a-9f2b-1234567890ab&amp;filter_traceId=web123&amp;freeText=timeout</pre>
+          </div>
+          <h4>Response · <code class="mono">text/event-stream</code></h4>
+          <div class="tblwrap">
+            <table>
+              <thead><tr><th>Event</th><th>Data payload</th><th>Notes</th></tr></thead>
+              <tbody>
+                <tr><td class="mono">chunk</td><td class="mono">LogLine[]</td><td>A batch of matched lines (same shape as <code class="field">POST /api/search</code>'s <code class="field">lines</code>), in chronological order. Zero or more of these arrive over the connection's lifetime.</td></tr>
+                <tr><td class="mono">progress</td><td class="mono">SearchProgress</td><td><code class="mono">{ "nodeLabel": "node-1", "nodesCompleted": 3, "nodesTotal": 5 }</code> — emitted each time one (node, log file) scan finishes, so the UI can show e.g. "3/5 scanned" between chunks rather than sitting idle.</td></tr>
+                <tr><td class="mono">done</td><td class="mono">SearchSummary</td><td><code class="mono">{ "totalMatched", "truncated", "unreachableNodes", "elapsedMillis" }</code> — same bookkeeping fields as <code class="field">POST /api/search</code>'s response, minus the lines (already delivered via <code class="mono">chunk</code>). Always the last event; the connection closes right after.</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="callout">
+            <span class="icon">i</span>
+            <p>The connection is force-closed server-side after <code class="mono">search.sse-timeout-millis</code> (default 60s) if it's still open — treat an <code class="mono">EventSource</code> <code class="mono">error</code> event with no prior <code class="mono">done</code> as "connection dropped," not necessarily a search failure.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="endpoint" id="get-search-export">
+        <div class="ep-head">
+          <span class="method get">GET</span>
+          <span class="ep-path"><span class="p">/api/search/</span>export</span>
+          <span class="authbadge pub">PUBLIC</span>
+        </div>
+        <div class="ep-body">
+          <p>Same parameters as <code class="field">GET /stream</code> above, but responds with the matched lines as a plain-text file download instead of JSON/SSE — what the search page's "Download all matches" link calls. Streams directly to the response as it scans rather than buffering the whole result set, so there's no practical size limit beyond the server's normal result cap.</p>
+          <h4>Query parameters</h4>
+          <p>Identical to <code class="field">GET /stream</code>: <code class="field">projectId</code> (required), <code class="field">from</code>/<code class="field">to</code>/<code class="field">freeText</code> (optional), <code class="field">filter_&lt;key&gt;</code> per active filter.</p>
+          <h4>Response · <code class="mono">text/plain</code></h4>
+          <p>One raw matched line per line of the file (each line's <code class="field">raw</code> field, not JSON) — a multi-line entry (a stack trace folded in as a continuation) is written exactly as assembled. The response carries <code class="mono">Content-Disposition: attachment; filename="search-results-&lt;date&gt;.log"</code>, so a plain <code class="mono">&lt;a href="/api/search/export?..."&gt;</code> link triggers a normal browser download — no fetch/blob code needed.</p>
+          <div class="statuses">
+            <span class="status-chip ok"><span class="code">200</span> ok (even zero matches — an empty file)</span>
+            <span class="status-chip warn"><span class="code">400</span> missing projectId</span>
           </div>
         </div>
       </div>
@@ -771,11 +846,26 @@
     {
       <span class="k">"logSourceId"</span><span class="p">:</span> <span class="s">"9c6a2e1d-4b3f-4a11-8c9a-abcdef012345"</span><span class="p">,</span>
       <span class="k">"nodeLabel"</span><span class="p">:</span> <span class="s">"node-1"</span><span class="p">,</span>
-      <span class="k">"liveLogPath"</span><span class="p">:</span> <span class="s">"/var/log/payments/app.log"</span><span class="p">,</span>
-      <span class="k">"backupRootPath"</span><span class="p">:</span> <span class="s">"/var/log/payments/backup"</span><span class="p">,</span>
-      <span class="k">"backupPathPattern"</span><span class="p">:</span> <span class="s">"app.{date}.{i}.log.gz"</span><span class="p">,</span>
-      <span class="k">"lastCheckStatus"</span><span class="p">:</span> <span class="s">"UNKNOWN"</span><span class="p">,</span>
-      <span class="k">"lastCheckMessage"</span><span class="p">:</span> <span class="n">null</span>
+      <span class="k">"logFiles"</span><span class="p">:</span> [
+        {
+          <span class="k">"logFileId"</span><span class="p">:</span> <span class="s">"6f1e9a2b-2222-4a11-8c9a-abcdef012345"</span><span class="p">,</span>
+          <span class="k">"fileLabel"</span><span class="p">:</span> <span class="s">"Application"</span><span class="p">,</span>
+          <span class="k">"liveLogPath"</span><span class="p">:</span> <span class="s">"/var/log/payments/app.log"</span><span class="p">,</span>
+          <span class="k">"backupRootPath"</span><span class="p">:</span> <span class="s">"/var/log/payments/backup"</span><span class="p">,</span>
+          <span class="k">"backupPathPattern"</span><span class="p">:</span> <span class="s">"app.{date}.{i}.log.gz"</span><span class="p">,</span>
+          <span class="k">"lastCheckStatus"</span><span class="p">:</span> <span class="s">"UNKNOWN"</span><span class="p">,</span>
+          <span class="k">"lastCheckMessage"</span><span class="p">:</span> <span class="n">null</span>
+        },
+        {
+          <span class="k">"logFileId"</span><span class="p">:</span> <span class="s">"6f1e9a2b-3333-4a11-8c9a-abcdef012345"</span><span class="p">,</span>
+          <span class="k">"fileLabel"</span><span class="p">:</span> <span class="s">"Error"</span><span class="p">,</span>
+          <span class="k">"liveLogPath"</span><span class="p">:</span> <span class="s">"/var/log/payments/error.log"</span><span class="p">,</span>
+          <span class="k">"backupRootPath"</span><span class="p">:</span> <span class="s">"/var/log/payments/backup"</span><span class="p">,</span>
+          <span class="k">"backupPathPattern"</span><span class="p">:</span> <span class="s">"error.{date}.{i}.log.gz"</span><span class="p">,</span>
+          <span class="k">"lastCheckStatus"</span><span class="p">:</span> <span class="s">"REACHABLE"</span><span class="p">,</span>
+          <span class="k">"lastCheckMessage"</span><span class="p">:</span> <span class="s">"Live: Reachable — file exists (2048 bytes)"</span>
+        }
+      ]
     }
   ],
   <span class="k">"filterFields"</span><span class="p">:</span> [
@@ -791,11 +881,12 @@
     <span class="k">"timestampPattern"</span><span class="p">:</span> <span class="s">"yyyy-MM-dd HH:mm:ss.SSS"</span><span class="p">,</span>
     <span class="k">"timestampRegexOrPosition"</span><span class="p">:</span> <span class="n">null</span><span class="p">,</span>
     <span class="k">"levelPattern"</span><span class="p">:</span> <span class="s">"\\b(TRACE|DEBUG|INFO|WARN|ERROR)\\b"</span><span class="p">,</span>
-    <span class="k">"loggerPattern"</span><span class="p">:</span> <span class="n">null</span>
+    <span class="k">"loggerPattern"</span><span class="p">:</span> <span class="n">null</span><span class="p">,</span>
+    <span class="k">"timeZone"</span><span class="p">:</span> <span class="s">"Asia/Kolkata"</span>
   }
 }</pre>
           </div>
-          <p><code class="field">linePattern</code> is <code class="mono">null</code> when the project has none configured — don't assume the object always exists.</p>
+          <p><code class="field">linePattern</code> is <code class="mono">null</code> when the project has none configured — don't assume the object always exists. A node can carry more than one <code class="field">logFiles</code> row (one per distinct output it writes — <code class="mono">app.log</code>, <code class="mono">error.log</code>, <code class="mono">access.log</code>, ...); search and the "Test path" check both operate at this <code class="field">logFiles</code> granularity, not the node as a whole. <code class="field">linePattern.timeZone</code> is the IANA zone this project's log timestamps are parsed in — it's what the Search API's <code class="field">zoneId</code> (see <code class="mono">GET /api/search/projects/{id}</code>) is derived from.</p>
           <div class="statuses">
             <span class="status-chip ok"><span class="code">200</span> found</span>
             <span class="status-chip warn"><span class="code">404</span> no such project</span>
@@ -824,9 +915,10 @@
               </tbody>
             </table>
           </div>
-          <p style="margin-top:-6px"><strong>NodeRequest:</strong> <code class="field">nodeLabel</code>, <code class="field">liveLogPath</code>, <code class="field">backupRootPath</code>, <code class="field">backupPathPattern</code> (all strings; only <code class="field">nodeLabel</code> is effectively required — a row with no label is dropped).<br/>
+          <p style="margin-top:-6px"><strong>NodeRequest:</strong> <code class="field">nodeLabel</code> (string), <code class="field">logFiles</code> (<code class="mono">LogFileRequest[]</code>) — only <code class="field">nodeLabel</code> is effectively required, a row with no label is dropped; <code class="field">logFiles</code> may be empty (a node with no configured output yet).<br/>
+          <strong>LogFileRequest</strong> (one distinct log output nested under a node — <code class="mono">app.log</code>, <code class="mono">error.log</code>, ...): <code class="field">fileLabel</code>, <code class="field">liveLogPath</code>, <code class="field">backupRootPath</code>, <code class="field">backupPathPattern</code> — all strings.<br/>
           <strong>FilterFieldRequest:</strong> <code class="field">key</code>, <code class="field">label</code>, <code class="field">mdcKey</code>, <code class="field">matchType</code> (see enum below, defaults to <code class="mono">EXACT_TOKEN</code>), <code class="field">linePrefix</code>.<br/>
-          <strong>LinePatternRequest:</strong> <code class="field">timestampPattern</code>, <code class="field">timestampRegexOrPosition</code>, <code class="field">levelPattern</code>, <code class="field">loggerPattern</code> — all optional strings.</p>
+          <strong>LinePatternRequest:</strong> <code class="field">timestampPattern</code>, <code class="field">timestampRegexOrPosition</code>, <code class="field">levelPattern</code>, <code class="field">loggerPattern</code>, <code class="field">timeZone</code> — all optional strings; <code class="field">timeZone</code> must be a valid IANA zone id (e.g. <code class="mono">UTC</code>, <code class="mono">Asia/Kolkata</code>) if given, or the whole request <code class="mono">400</code>s.</p>
 
           <div class="codebox">
             <div class="barlabel"><span>example request</span><button class="copybtn" onclick="copyCode(this)">Copy</button></div>
@@ -836,9 +928,14 @@
   <span class="k">"nodes"</span><span class="p">:</span> [
     {
       <span class="k">"nodeLabel"</span><span class="p">:</span> <span class="s">"node-1"</span><span class="p">,</span>
-      <span class="k">"liveLogPath"</span><span class="p">:</span> <span class="s">"/var/log/payments/app.log"</span><span class="p">,</span>
-      <span class="k">"backupRootPath"</span><span class="p">:</span> <span class="s">"/var/log/payments/backup"</span><span class="p">,</span>
-      <span class="k">"backupPathPattern"</span><span class="p">:</span> <span class="s">"app.{date}.{i}.log.gz"</span>
+      <span class="k">"logFiles"</span><span class="p">:</span> [
+        {
+          <span class="k">"fileLabel"</span><span class="p">:</span> <span class="s">"Application"</span><span class="p">,</span>
+          <span class="k">"liveLogPath"</span><span class="p">:</span> <span class="s">"/var/log/payments/app.log"</span><span class="p">,</span>
+          <span class="k">"backupRootPath"</span><span class="p">:</span> <span class="s">"/var/log/payments/backup"</span><span class="p">,</span>
+          <span class="k">"backupPathPattern"</span><span class="p">:</span> <span class="s">"app.{date}.{i}.log.gz"</span>
+        }
+      ]
     }
   ],
   <span class="k">"filterFields"</span><span class="p">:</span> [
@@ -852,14 +949,15 @@
   ],
   <span class="k">"linePattern"</span><span class="p">:</span> {
     <span class="k">"timestampPattern"</span><span class="p">:</span> <span class="s">"yyyy-MM-dd HH:mm:ss.SSS"</span><span class="p">,</span>
-    <span class="k">"levelPattern"</span><span class="p">:</span> <span class="s">"\\b(TRACE|DEBUG|INFO|WARN|ERROR)\\b"</span>
+    <span class="k">"levelPattern"</span><span class="p">:</span> <span class="s">"\\b(TRACE|DEBUG|INFO|WARN|ERROR)\\b"</span><span class="p">,</span>
+    <span class="k">"timeZone"</span><span class="p">:</span> <span class="s">"Asia/Kolkata"</span>
   }
 }</pre>
           </div>
           <p><strong>Response · 201</strong> — body is the created <code class="field">ProjectDetailResponse</code> (same shape as <code class="mono">GET /projects/{id}</code> above), plus a <code class="field">Location</code> header pointing at <code class="mono">/api/projects/{id}</code>.</p>
           <div class="statuses">
             <span class="status-chip ok"><span class="code">201</span> created</span>
-            <span class="status-chip warn"><span class="code">400</span> no name / no labeled node / bad field pairing</span>
+            <span class="status-chip warn"><span class="code">400</span> no name / no labeled node / bad field pairing / invalid <code class="mono">linePattern.timeZone</code></span>
             <span class="status-chip warn"><span class="code">409</span> name already taken</span>
           </div>
         </div>
@@ -875,7 +973,7 @@
           <p>Replaces a project's configuration. Same request/response shape as create.</p>
           <div class="callout warn">
             <span class="icon">!</span>
-            <p><strong>This is a wholesale replace, not a merge.</strong> Send the complete set of nodes and filter fields you want the project to end up with — anything you leave out is deleted, not preserved. There's also no stable id to track a node across an update: every <code class="field">logSourceId</code> in the response is freshly generated each time, even for a node that looks unchanged. Don't cache a <code class="field">logSourceId</code> across a save.</p>
+            <p><strong>This is a wholesale replace, not a merge.</strong> Send the complete set of nodes (with their nested <code class="field">logFiles</code>) and filter fields you want the project to end up with — anything you leave out is deleted, not preserved. There's also no stable id to track a node or log file across an update: every <code class="field">logSourceId</code>/<code class="field">logFileId</code> in the response is freshly generated each time, even for rows that look unchanged. Don't cache either id across a save — this also means a log file's <code class="field">lastCheckStatus</code>/<code class="field">lastCheckMessage</code> resets to <code class="mono">UNKNOWN</code>/<code class="mono">null</code> on every save unless you re-run <code class="mono">POST /api/projects/path-check</code> with the newly returned <code class="field">logFileId</code> afterward.</p>
           </div>
           <p>Renaming to a name used by a <em>different</em> project still returns <code class="mono">409</code>; renaming a project to its own current name is fine.</p>
           <div class="statuses">
@@ -989,7 +1087,7 @@
               <tbody>
                 <tr><td><code class="field">livePath</code></td><td class="mono">string</td><td><span class="opt">optional</span></td><td>Checked if non-blank.</td></tr>
                 <tr><td><code class="field">backupPath</code></td><td class="mono">string</td><td><span class="opt">optional</span></td><td>Checked if non-blank. At least one of the two should be given.</td></tr>
-                <tr><td><code class="field">logSourceId</code></td><td class="mono">UUID</td><td><span class="opt">optional</span></td><td>Pass this only when checking an <em>already-saved</em> node — the result is also recorded onto it (visible next time you <code class="mono">GET</code> the project). Omit for an ad-hoc check of paths not yet saved.</td></tr>
+                <tr><td><code class="field">logFileId</code></td><td class="mono">UUID</td><td><span class="opt">optional</span></td><td>Pass this only when checking an <em>already-persisted</em> log output (a <code class="field">logFileId</code> from a prior <code class="mono">GET</code>/create/update) — the result is also recorded onto it (visible next time you <code class="mono">GET</code> the project, as <code class="field">lastCheckStatus</code>/<code class="field">lastCheckMessage</code> on that <code class="field">logFiles</code> row). Omit for an ad-hoc check of paths not yet saved.</td></tr>
               </tbody>
             </table>
           </div>
@@ -1065,8 +1163,10 @@
         </div></li>
         <li class="step"><div class="rail"><div class="num"></div></div><div class="content">
           <h4>Search</h4>
-          <p>Send the filled filter values as <code class="field">filters</code>, plus the date range and free text. Always include <code class="field">page</code>/<code class="field">pageSize</code>.</p>
+          <p>Send the filled filter values as <code class="field">filters</code>, plus the date range (converted through the project's <code class="field">zoneId</code> from the previous step into absolute-instant strings) and free text. Always include <code class="field">page</code>/<code class="field">pageSize</code>. For a "Live" mode that streams matches as they're found instead of waiting for one page, use <code class="mono">GET /stream</code> with the same parameters; for a one-shot download of every match, link straight to <code class="mono">GET /export</code>.</p>
           <span class="ep-ref"><span class="tag tag-post">POST</span> /api/search</span>
+          <span class="ep-ref"><span class="tag tag-get">GET</span> /api/search/stream</span>
+          <span class="ep-ref"><span class="tag tag-get">GET</span> /api/search/export</span>
         </div></li>
         <li class="step"><div class="rail"><div class="num"></div></div><div class="content">
           <h4>Render results, page, and surface warnings</h4>
@@ -1078,7 +1178,7 @@
       <ol class="steps">
         <li class="step"><div class="rail"><div class="num"></div></div><div class="content">
           <h4>Collect the form in your own UI state</h4>
-          <p>Name, one or more labeled nodes, filter fields, optional line pattern — nothing is sent to the server until the admin is done.</p>
+          <p>Name, one or more labeled nodes (each with one or more <code class="field">logFiles</code> rows for its distinct log outputs), filter fields, optional line pattern — nothing is sent to the server until the admin is done.</p>
         </div></li>
         <li class="step"><div class="rail"><div class="num"></div></div><div class="content">
           <h4>Submit</h4>
@@ -1095,7 +1195,7 @@
       <ol class="steps">
         <li class="step"><div class="rail"><div class="num"></div></div><div class="content">
           <h4>Optional: upload the target app's logback-spring.xml</h4>
-          <p>Use the result to pre-fill filter-field rows (from <code class="field">mdcFields</code>) and one node's <code class="field">backupPathPattern</code>. Still let the admin name the project and fill in real paths themselves.</p>
+          <p>Use the result to pre-fill filter-field rows (from <code class="field">mdcFields</code>) and one <code class="field">logFiles</code> row's <code class="field">backupPathPattern</code>. Still let the admin name the project and fill in real paths themselves.</p>
           <span class="ep-ref"><span class="tag tag-post">POST</span> /api/projects/logback/parse</span>
         </div></li>
         <li class="step"><div class="rail"><div class="num"></div></div><div class="content">
@@ -1104,8 +1204,8 @@
           <span class="ep-ref"><span class="tag tag-post">POST</span> /api/projects/sample-line/analyze</span>
         </div></li>
         <li class="step"><div class="rail"><div class="num"></div></div><div class="content">
-          <h4>Optional: verify a node's paths before saving</h4>
-          <p>Show a live/unreachable badge next to each node row as the admin types.</p>
+          <h4>Optional: verify a log file's paths before saving</h4>
+          <p>Show a live/unreachable badge next to each <code class="field">logFiles</code> row (not the node itself — a node's outputs are checked independently) as the admin types.</p>
           <span class="ep-ref"><span class="tag tag-post">POST</span> /api/projects/path-check</span>
         </div></li>
         <li class="step"><div class="rail"><div class="num"></div></div><div class="content">
@@ -1140,6 +1240,8 @@
         <div class="qr-row"><span class="method get">GET</span><span class="path">/api/search/projects</span><span class="authbadge pub">PUBLIC</span></div>
         <div class="qr-row"><span class="method get">GET</span><span class="path">/api/search/projects/{id}</span><span class="authbadge pub">PUBLIC</span></div>
         <div class="qr-row"><span class="method post">POST</span><span class="path">/api/search</span><span class="authbadge pub">PUBLIC</span></div>
+        <div class="qr-row"><span class="method get">GET</span><span class="path">/api/search/stream</span><span class="authbadge pub">PUBLIC</span></div>
+        <div class="qr-row"><span class="method get">GET</span><span class="path">/api/search/export</span><span class="authbadge pub">PUBLIC</span></div>
         <div class="qr-row"><span class="method get">GET</span><span class="path">/api/projects</span><span class="authbadge basic">BASIC</span></div>
         <div class="qr-row"><span class="method get">GET</span><span class="path">/api/projects/{id}</span><span class="authbadge basic">BASIC</span></div>
         <div class="qr-row"><span class="method post">POST</span><span class="path">/api/projects</span><span class="authbadge basic">BASIC</span></div>
